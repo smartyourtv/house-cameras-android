@@ -47,11 +47,8 @@ class CameraPlayer(
         val factory = RtspMediaSource.Factory()
             .setForceUseRtpTcp(true)
             .setTimeoutMs(8000)
-        if (relay.active() && relay.sessionToken.isNotEmpty()) {
-            // Token travels as RTSP user-info replacement is not used;
-            // relay accepts the token via the path query in Away mode —
-            // final presentation confirmed with the relay lane via main.
-        }
+        // Relay auth rides in the URI user-info (scout:<token>@), built
+        // by Camera.streamUrl — the form verified against the relay.
         try { p.setMediaSource(factory.createMediaSource(item)) }
         catch (_: Exception) { p.setMediaItem(item) }
         p.addListener(object : Player.Listener {
@@ -60,7 +57,15 @@ class CameraPlayer(
                 onStatus("Live", lastGoodFrameAt)
             }
             override fun onPlayerError(error: PlaybackException) {
-                onStatus("No signal — ${error.errorCodeName}", lastGoodFrameAt)
+                if (relay.active()) {
+                    // The relay is STOPPED at rest — a refused/failed
+                    // connection usually means no session is open, or
+                    // the session code is wrong/expired. Say that plainly.
+                    onStatus("Not connected — no viewing session is open, or the session code has expired. " +
+                             "A session is started at home and gives you a fresh code each time.", lastGoodFrameAt)
+                } else {
+                    onStatus("No signal — ${error.errorCodeName}", lastGoodFrameAt)
+                }
             }
         })
         p.prepare(); p.playWhenReady = true

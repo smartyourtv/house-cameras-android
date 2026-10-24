@@ -92,8 +92,9 @@ object Store {
                 main = sourceParse(o.optJSONObject("main")), sub = sourceParse(o.optJSONObject("sub"))))
         }
         val r = root.optJSONObject("relay") ?: JSONObject()
-        cfg.relay = RelayConfig(r.optBoolean("enabled", false), r.optString("host"),
-            r.optInt("port", 8554), r.optInt("httpPort", 8080),
+        cfg.relay = RelayConfig(r.optBoolean("enabled", false),
+            r.optString("host").ifEmpty { "100.78.8.93" },
+            r.optInt("port", 8554), r.optInt("httpPort", 8888),
             Crypto.unprotect(r.optString("sessionToken")))
         cfg.lastNotifiedVersionCode = root.optInt("lastNotifiedVersionCode", 0)
         return cfg

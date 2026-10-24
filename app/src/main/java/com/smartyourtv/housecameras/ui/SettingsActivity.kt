@@ -27,23 +27,27 @@ class SettingsActivity : Activity() {
         root.addView(TextView(this).apply {
             textSize = 13f
             text = "At home, the app talks straight to the cameras. Away, it never talks to the cameras at all — " +
-                   "it talks only to the small relay running at home (on the ThinkPad, reachable by its Tailscale address). " +
-                   "The relay only runs while a viewing session is open, and it asks for the session code below each time."
+                   "it talks only to the small relay running at home (on the ThinkPad, at its Tailscale address 100.78.8.93). " +
+                   "The relay is normally OFF — that is its resting state, not a fault. A viewing session is started at home " +
+                   "(ask Scout), and each session has its own fresh code: the user name is always \"scout\" and the code is the password. " +
+                   "A session closes itself after about 10 minutes with nobody watching, and never runs longer than 2 hours — " +
+                   "when it closes, you need a new session and a new code. Remote viewing carries house-1 to house-6 (main picture)."
         })
         fun field(v: String, hint: String) = EditText(this).apply { setText(v); this.hint = hint; textSize = 16f }
         val hostF = field(cfg.relay.host, "Relay address (Tailscale name or 100.x address)")
         val portF = field(cfg.relay.port.toString(), "Relay video port").apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER }
-        val tokenF = field(cfg.relay.sessionToken, "Session code from the relay").apply {
+        val tokenF = field(cfg.relay.sessionToken, "Session code for this session (user name is always scout)").apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
         root.addView(TextView(this).apply { text = "Relay address" }); root.addView(hostF)
         root.addView(TextView(this).apply { text = "Relay video port" }); root.addView(portF)
         root.addView(TextView(this).apply { text = "Session code" }); root.addView(tokenF)
         val relayState = TextView(this).apply {
             textSize = 13f
-            text = if (cfg.relay.host.isEmpty()) "Relay status: no relay address is set yet — Away mode is ready in the app, " +
-                   "waiting for the relay at home to be switched on and its address entered here."
-                   else "Relay status: address set. Whether the relay answers is checked when you open a camera in Away mode."
+            text = if (cfg.relay.sessionToken.isEmpty()) "Relay status: no session code entered. The relay is stopped until a session " +
+                   "is started at home — Away mode will show \"not connected\" until then, which is normal."
+                   else "Relay status: a session code is entered. If the session has ended, cameras will show \"not connected\" — " +
+                        "start a new session at home to get a fresh code."
         }
         root.addView(relayState)
 

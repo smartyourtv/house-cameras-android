@@ -63,13 +63,21 @@ version. Foundation: `~/workspace/house-cameras-windows/docs/DESIGN.md` +
 6. **Remote viewing is CORE here (Windows v1 was LAN-only):** two source
    modes — **At home (LAN direct)** and **Away (relay)**. In Away mode the
    app never talks to a camera directly; it talks only to the ThinkPad
-   relay at its Tailscale address, presenting the per-session token the
-   relay issues. Relay stream path scheme (to be confirmed with the
-   Enterprise Security lane via main before on-camera acceptance):
-   `rtsp://<relay-host>:<port>/<camera-id>` with token auth, relay stopped
-   at rest. Until the relay interface is confirmed, Away mode is present
-   in settings/UI with the host/token fields and clearly labelled
-   "relay not connected yet" — it does not block LAN v1.
+   relay. **Interface CONFIRMED 2026-10-24** (Enterprise Security lane,
+   `camera-relay-build-2026-10-24.md`; wired in v1.0.1): host
+   **100.78.8.93** (Tailscale only — the relay binds nowhere else),
+   RTSP **:8554** primary (HLS :8888 fallback surface, WebRTC :8889 is
+   browser-oriented), paths **/house-1 … /house-6** (main streams only;
+   house-7 is not relayed and shows "at-home only" in Away mode), auth
+   user **"scout"** + the per-session token as password embedded in the
+   RTSP URI (`rtsp://scout:<token>@100.78.8.93:8554/house-1`, the form
+   verified against the relay). The relay is **STOPPED at rest** — the
+   app treats a refused connection as the normal resting state and says
+   so in plain language ("no viewing session is open, or the session
+   code has expired"). Sessions auto-stop after ~10 idle minutes with a
+   2-hour hard cap; a new session means a new token, re-entered in
+   Settings. The token is Keystore-encrypted at rest like camera
+   passwords and never logged.
 7. **Updater install:** download to app cache, SHA-256 verified, then the
    system installer via FileProvider (user taps Install) — Android does
    not allow silent installs for sideloaded apps.

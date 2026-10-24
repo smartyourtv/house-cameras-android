@@ -26,14 +26,19 @@ data class Camera(
     var sub: CameraSource = CameraSource(),
     var notes: String = ""
 ) {
-    /** Build a playable URL in memory. In relay mode the host is the
-     *  ThinkPad relay (Tailscale) and the path is /<camera-name>;
-     *  the session token is passed by the player as an HTTP header /
-     *  RTSP user-info by the caller — never written to disk here. */
+    /** Build a playable URL in memory. Relay mode (confirmed interface,
+     *  camera-relay-build-2026-10-24): the relay on the ThinkPad's
+     *  Tailscale address serves each camera's MAIN stream at
+     *  /<slot-name> on RTSP :8554, authenticated as user "scout" with
+     *  the per-session token as the password, embedded in the URI
+     *  (verified against the relay). The camera's own address and
+     *  password never appear in a relay URL. */
     fun streamUrl(source: CameraSource, relay: RelayConfig): String {
         if (relay.active()) {
             val p = "/" + name.lowercase().replace(" ", "-")
-            return "rtsp://${relay.host}:${relay.port}$p"
+            val userInfo = if (relay.sessionToken.isNotEmpty())
+                "scout:${urlEncode(relay.sessionToken)}@" else ""
+            return "rtsp://$userInfo${relay.host}:${relay.port}$p"
         }
         val userInfo = if (credentials.hasLogin())
             "${urlEncode(credentials.username)}:${urlEncode(credentials.password)}@" else ""
@@ -41,11 +46,15 @@ data class Camera(
         val port = if (source.port > 0) source.port else if (scheme == "http") 80 else 554
         return "$scheme://$userInfo$host:$port${source.path}"
     }
+    /** HLS fallback URL on the relay (:8888, /<slot>/index.m3u8).
+     *  HLS on this relay needs HTTP Basic (scout + token) AND cookie
+     *  handling — see the build record. RTSP is the primary path. */
+    fun hlsUrl(relay: RelayConfig): String =
+        "http://${relay.host}:${relay.httpPort}/${name.lowercase().replace(" ", "-")}/index.m3u8"
+
     fun snapshotUrl(path: String, relay: RelayConfig): String {
-        if (relay.active()) return "http://${relay.host}:${relay.httpPort}/${name.lowercase().replace(" ", "-")}/snapshot.jpg"
-        val auth = credentials
-        val base = "http://$host$path"
-        return base // caller adds Basic auth header; credentials never in the URL
+        // The relay serves no snapshots; snapshot sources are LAN-only.
+        return "http://$host$path" // caller adds Basic auth header; credentials never in the URL
     }
     companion object {
         fun urlEncode(s: String): String =
@@ -55,12 +64,15 @@ data class Camera(
 
 data class RelayConfig(
     var enabled: Boolean = false,          // Away mode on/off
-    var host: String = "",                 // ThinkPad Tailscale address/name
-    var port: Int = 8554,                  // relay RTSP port (confirm with relay lane)
-    var httpPort: Int = 8080,              // relay snapshot port (confirm with relay lane)
-    var sessionToken: String = ""          // per-session token, entered by user, Keystore-encrypted at rest
+    var host: String = "100.78.8.93",      // ThinkPad Tailscale address (relay binds ONLY there)
+    var port: Int = 8554,                  // relay RTSP (confirmed)
+    var httpPort: Int = 8888,              // relay HLS (confirmed)
+    var sessionToken: String = ""          // per-session token = password for user "scout";
+                                           // fresh at every session start, entered by the user,
+                                           // Keystore-encrypted at rest, dies with the session
 ) {
     fun active() = enabled && host.isNotEmpty()
+    companion object { const val USERNAME = "scout" }
 }
 
 data class AppConfig(

@@ -89,7 +89,15 @@ class MainActivity : Activity() {
             }
             val status = TextView(this).apply { setTextColor(Color.LTGRAY); textSize = 12f; text = "${cam.name} — starting…" }
             val source = if (cam.sub.path.isNotEmpty()) cam.sub else cam.main
-            if (source.kind == "snapshot" || source.kind == "mjpeg") {
+            val relayed = cfg.relay.active() && cam.name.matches(Regex("house-[1-6]"))
+            if (cfg.relay.active() && !relayed) {
+                val tv = TextView(this).apply {
+                    setTextColor(Color.GRAY); gravity = Gravity.CENTER; textSize = 13f
+                    text = "Not part of remote viewing — the home relay carries house-1 to house-6 only."
+                }
+                cell.addView(tv, LinearLayout.LayoutParams(cellW, cellH))
+                status.text = "${cam.name} — at-home only"
+            } else if (!cfg.relay.active() && (source.kind == "snapshot" || source.kind == "mjpeg")) {
                 val img = ImageView(this)
                 cell.addView(img, LinearLayout.LayoutParams(cellW, cellH))
                 val cp = CameraPlayer(this, cam, source, cfg.relay) { s, _ ->

@@ -45,13 +45,23 @@ class CoreTest {
     }
 
     @Test fun relayUrlUsesRelayHostAndCameraName() {
+        // Confirmed relay interface (camera-relay-build-2026-10-24):
+        // rtsp://scout:<session-token>@100.78.8.93:8554/house-N
         val cam = Camera(name = "house-4", host = "192.168.40.218",
             credentials = Credentials("admin", "pw"))
-        val relay = RelayConfig(enabled = true, host = "100.64.0.9", port = 8554)
+        val relay = RelayConfig(enabled = true, sessionToken = "tok123")
+        assertEquals("100.78.8.93", relay.host)
         val url = cam.streamUrl(Templates.forFamily("hip2p").main, relay)
-        assertEquals("rtsp://100.64.0.9:8554/house-4", url)
+        assertEquals("rtsp://scout:tok123@100.78.8.93:8554/house-4", url)
         assertFalse("camera LAN address must not appear in relay mode", url.contains("192.168"))
-        assertFalse("camera password must not appear in relay mode", url.contains("pw@"))
+        assertFalse("camera password must not appear in relay mode", url.contains("admin"))
+        // No token yet -> no user-info; the relay will 401 and the app
+        // reports "not connected", which is the resting state.
+        val bare = cam.streamUrl(Templates.forFamily("hip2p").main,
+            RelayConfig(enabled = true))
+        assertEquals("rtsp://100.78.8.93:8554/house-4", bare)
+        // HLS fallback lives on :8888 with the same slot path.
+        assertEquals("http://100.78.8.93:8888/house-4/index.m3u8", cam.hlsUrl(relay))
     }
 
     @Test fun discoveryMergePrefersKnownFamily() {

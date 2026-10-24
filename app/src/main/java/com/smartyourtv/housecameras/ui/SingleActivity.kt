@@ -21,7 +21,9 @@ class SingleActivity : Activity() {
         val status = TextView(this).apply { setTextColor(Color.LTGRAY); textSize = 13f; text = "${cam.name} — starting…" }
         root.addView(status)
         val source = if (cam.main.path.isNotEmpty()) cam.main else cam.sub
-        if (source.kind == "snapshot" || source.kind == "mjpeg") {
+        // In Away mode the relay serves the main stream at /<slot name>
+        // (streamUrl builds that); snapshot polling is LAN-only.
+        if (!cfg.relay.active() && (source.kind == "snapshot" || source.kind == "mjpeg")) {
             val img = ImageView(this)
             root.addView(img, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             player = CameraPlayer(this, cam, source, cfg.relay) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
