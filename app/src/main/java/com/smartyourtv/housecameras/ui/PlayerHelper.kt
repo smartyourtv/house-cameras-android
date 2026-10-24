@@ -36,7 +36,27 @@ class CameraPlayer(
     @Volatile var stopped = false
     var lastGoodFrameAt: Long = 0
 
+    // Reconnect-with-backoff (session tolerance, relay spec): a relay
+    // path may report not-ready for up to ~30 s after a session starts,
+    // and a stream ends outright at the 2 h cap / session stop. Relay
+    // mode retries every 4 s for ~90 s before declaring "not connected";
+    // LAN mode retries a handful of times with growing waits. A fresh
+    // first frame resets the counter.
+    private val handler = Handler(Looper.getMainLooper())
+    private var attempts = 0
+    private var retryPending = false
+    private var viewRef: PlayerView? = null
+
     fun attachToPlayerView(view: PlayerView) {
+        viewRef = view
+        attempts = 0
+        startPlayer()
+    }
+
+    private fun startPlayer() {
+        if (stopped) return
+        val view = viewRef ?: return
+        try { player?.release() } catch (_: Exception) {}
         val p = ExoPlayer.Builder(ctx).build()
         player = p
         view.player = p
@@ -53,23 +73,45 @@ class CameraPlayer(
         catch (_: Exception) { p.setMediaItem(item) }
         p.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() {
+                attempts = 0
                 lastGoodFrameAt = System.currentTimeMillis()
                 onStatus("Live", lastGoodFrameAt)
             }
-            override fun onPlayerError(error: PlaybackException) {
-                if (relay.active()) {
-                    // The relay is STOPPED at rest — a refused/failed
-                    // connection usually means no session is open, or
-                    // the session code is wrong/expired. Say that plainly.
-                    onStatus("Not connected — no viewing session is open, or the session code has expired. " +
-                             "A session is started at home and gives you a fresh code each time.", lastGoodFrameAt)
-                } else {
-                    onStatus("No signal — ${error.errorCodeName}", lastGoodFrameAt)
-                }
+            override fun onPlayerError(error: PlaybackException) { scheduleRetry(error.errorCodeName) }
+            override fun onPlaybackStateChanged(state: Int) {
+                // A stream that simply ends (session stop / 2 h cap)
+                // arrives here rather than as an error.
+                if (state == Player.STATE_ENDED && lastGoodFrameAt > 0) scheduleRetry("ended")
             }
         })
         p.prepare(); p.playWhenReady = true
-        onStatus("Connecting…", lastGoodFrameAt)
+        onStatus(if (attempts == 0) "Connecting…" else "Reconnecting…", lastGoodFrameAt)
+    }
+
+    private fun scheduleRetry(reason: String) {
+        if (stopped || retryPending) return
+        retryPending = true
+        attempts++
+        if (relay.active()) {
+            if (attempts <= 22) {  // ~90 s of retries at 4 s intervals
+                onStatus("Connecting… a camera can take up to half a minute to appear after a session starts.", lastGoodFrameAt)
+                handler.postDelayed({ retryPending = false; startPlayer() }, 4000)
+            } else {
+                // The relay is STOPPED at rest — after the tolerance
+                // window, a failure means no session is open, or the
+                // session code is wrong/expired. Say that plainly.
+                onStatus("Not connected — no viewing session is open, or the session code has expired. " +
+                         "A session is started at home and gives you a fresh code each time.", lastGoodFrameAt)
+            }
+        } else {
+            if (attempts <= 5) {
+                val waitMs = minOf(2000L * (1 shl (attempts - 1)), 30000L)
+                onStatus("No signal — trying again…", lastGoodFrameAt)
+                handler.postDelayed({ retryPending = false; startPlayer() }, waitMs)
+            } else {
+                onStatus("No signal — $reason", lastGoodFrameAt)
+            }
+        }
     }
 
     fun startSnapshotPolling(image: ImageView) {
@@ -102,6 +144,7 @@ class CameraPlayer(
 
     fun release() {
         stopped = true
+        handler.removeCallbacksAndMessages(null)
         pollThread?.interrupt()
         try { player?.release() } catch (_: Exception) {}
         player = null

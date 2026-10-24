@@ -77,7 +77,18 @@ version. Foundation: `~/workspace/house-cameras-windows/docs/DESIGN.md` +
    code has expired"). Sessions auto-stop after ~10 idle minutes with a
    2-hour hard cap; a new session means a new token, re-entered in
    Settings. The token is Keystore-encrypted at rest like camera
-   passwords and never logged.
+   passwords and never logged. **Session tolerance (v1.0.2, from the
+   full client spec):** a relay path may be not-ready for up to ~30 s
+   after session start, so the player retries every 4 s for ~90 s
+   ("Connecting… a camera can take up to half a minute to appear")
+   before declaring not-connected; a stream that ends mid-view
+   (session stop / 2 h cap) re-enters the same path and ends at the
+   expired-session message. LAN mode retries 5 times with backoff.
+   HLS is not used by the player (RTSP is the spec's recommended
+   Android path), so its cookie dance is out of the client; WebRTC is
+   browser surface, also unused. Media is H.264 1080p + PCMA audio
+   where the camera supplies it — both handled by Media3/Android
+   platform decoders.
 7. **Updater install:** download to app cache, SHA-256 verified, then the
    system installer via FileProvider (user taps Install) — Android does
    not allow silent installs for sideloaded apps.
