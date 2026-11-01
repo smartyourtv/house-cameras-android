@@ -112,12 +112,16 @@ class MainActivity : Activity() {
                 cell.addView(tv, LinearLayout.LayoutParams(cellW, cellH))
                 status.text = "${cam.name} — not set up"
             } else {
+                val frame = android.widget.FrameLayout(this)
                 val pv = PlayerView(this)
-                cell.addView(pv, LinearLayout.LayoutParams(cellW, cellH))
+                val fallbackImg = ImageView(this).apply { visibility = View.GONE }
+                frame.addView(pv, android.widget.FrameLayout.LayoutParams(cellW, cellH))
+                frame.addView(fallbackImg, android.widget.FrameLayout.LayoutParams(cellW, cellH))
+                cell.addView(frame)
                 val cp = CameraPlayer(this, cam, source, cfg.relay) { s, _ ->
                     runOnUiThread { status.text = "${cam.name} — $s" }
                 }
-                players.add(cp); cp.attachToPlayerView(pv)
+                players.add(cp); cp.attachToPlayerView(pv, fallbackImg)
             }
             cell.addView(status)
             cell.setOnClickListener { openSingle(idx) }

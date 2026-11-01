@@ -16,6 +16,7 @@ import com.smartyourtv.housecameras.core.Camera
 import com.smartyourtv.housecameras.core.CameraSource
 import com.smartyourtv.housecameras.core.RelayConfig
 import com.smartyourtv.housecameras.core.SpsGuard
+import com.smartyourtv.housecameras.core.Templates
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
@@ -48,23 +49,44 @@ class CameraPlayer(
     private var retryPending = false
     private var viewRef: PlayerView? = null
 
-    fun attachToPlayerView(view: PlayerView) {
+    private var fallbackImageRef: android.widget.ImageView? = null
+
+    fun attachToPlayerView(view: PlayerView, fallbackImage: android.widget.ImageView? = null) {
         viewRef = view
+        fallbackImageRef = fallbackImage
         attempts = 0
         onStatus("Connecting…", lastGoodFrameAt)
         // CONTAINMENT (v1.0.4): before any player starts, pre-flight the
         // stream's H.265 SPS through the same parser Media3 will run.
-        // A stream that breaks the parser becomes an error tile — it
+        // A stream that breaks the parser never starts a player — it
         // can never take the app down. Inconclusive checks proceed.
         thread(name = "sps-guard-${cam.name}") {
             val safe = try { SpsGuard.streamIsSafe(cam, source, relay) } catch (_: Throwable) { true }
             handler.post {
                 if (stopped) return@post
-                if (!safe) {
-                    onStatus("This camera's picture format isn't supported by the player yet — " +
-                             "your other cameras still work.", lastGoodFrameAt)
-                } else startPlayer()
+                if (!safe) onVetoed() else startPlayer()
             }
+        }
+    }
+
+    /** A stream the video parser can't handle. Degrade instead of
+     *  dying: the ingest ladder's last resort — photo polling from the
+     *  camera's snapshot address (LAN only; the relay serves no
+     *  snapshots). Only if photos also fail does the tile settle on
+     *  the plain error message. */
+    private fun onVetoed() {
+        val img = fallbackImageRef
+        val snapPath = Templates.forFamily(cam.family).snapshot
+        if (img != null && !relay.active() && snapPath.isNotEmpty() && cam.host.isNotEmpty()) {
+            viewRef?.visibility = android.view.View.GONE
+            img.visibility = android.view.View.VISIBLE
+            onStatus("This camera's video format isn't supported — showing photos instead…", lastGoodFrameAt)
+            val snapSource = CameraSource(kind = "snapshot", path = snapPath, port = 80,
+                scheme = "http", via = "snapshot-fallback")
+            startSnapshotPolling(img, snapSource, vetoFallback = true)
+        } else {
+            onStatus("This camera's picture format isn't supported by the player yet — " +
+                     "your other cameras still work.", lastGoodFrameAt)
         }
     }
 
@@ -135,12 +157,14 @@ class CameraPlayer(
         }
     }
 
-    fun startSnapshotPolling(image: ImageView) {
+    fun startSnapshotPolling(image: ImageView, snapSource: CameraSource = source, vetoFallback: Boolean = false) {
         image.scaleType = ImageView.ScaleType.FIT_CENTER
+        val startedAt = System.currentTimeMillis()
+        var vetoReported = false
         pollThread = thread(name = "snap-${cam.name}") {
             while (!stopped) {
                 try {
-                    val conn = URL("http://${cam.host}${source.path}").openConnection() as HttpURLConnection
+                    val conn = URL("http://${cam.host}${snapSource.path}").openConnection() as HttpURLConnection
                     conn.connectTimeout = 1500; conn.readTimeout = 2000
                     if (cam.credentials.hasLogin()) {
                         val basic = Base64.getEncoder().encodeToString(
@@ -154,9 +178,15 @@ class CameraPlayer(
                         Handler(Looper.getMainLooper()).post {
                             if (!stopped) { image.setImageBitmap(bmp); onStatus("Live (photos)", lastGoodFrameAt) }
                         }
-                    } else onStatus("No signal", lastGoodFrameAt)
+                    } else if (!vetoFallback) onStatus("No signal", lastGoodFrameAt)
                 } catch (_: Exception) {
-                    if (!stopped) onStatus("No signal", lastGoodFrameAt)
+                    if (!stopped && !vetoFallback) onStatus("No signal", lastGoodFrameAt)
+                }
+                if (vetoFallback && !vetoReported && lastGoodFrameAt == 0L &&
+                    System.currentTimeMillis() - startedAt > 10000) {
+                    vetoReported = true
+                    onStatus("This camera's video format isn't supported by the player yet, and photos " +
+                             "aren't available either — your other cameras still work.", lastGoodFrameAt)
                 }
                 try { Thread.sleep(2000) } catch (_: InterruptedException) { break }
             }

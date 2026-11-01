@@ -29,10 +29,16 @@ class SingleActivity : Activity() {
             player = CameraPlayer(this, cam, source, cfg.relay) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
             player!!.startSnapshotPolling(img)
         } else {
+            val frame = android.widget.FrameLayout(this)
             val pv = PlayerView(this)
-            root.addView(pv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            val fallbackImg = ImageView(this).apply { visibility = android.view.View.GONE }
+            frame.addView(pv, android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            frame.addView(fallbackImg, android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            root.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             player = CameraPlayer(this, cam, source, cfg.relay) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
-            player!!.attachToPlayerView(pv)
+            player!!.attachToPlayerView(pv, fallbackImg)
         }
         val hint = TextView(this).apply {
             setTextColor(Color.GRAY); textSize = 12f

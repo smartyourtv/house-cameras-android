@@ -81,3 +81,19 @@ genuine x265 SPS parse, and a truncation fuzz proving the guard never
 throws. Live-stream parser verification: W2 launch after install
 (Mechanic lane) — house-4 tile Live proves it end-to-end; an error
 tile with the app alive proves containment instead.
+
+## v1.0.5 — house-4 SPS verdict + photo fallback (2026-11-01)
+Bytes-level verification with house-4's REAL sprop values (Mechanic
+lane DESCRIBE): replicating RtspMediaTrack's exact parser call in a
+JVM harness, Media3 1.4.1 reproduces the W2 crash precisely
+(ArrayIndexOutOfBounds 41/41) — and 1.8.1, 1.9.4 and 1.11.1 throw the
+IDENTICAL exception. No released Media3 parses this SPS; the bug is
+open upstream. Conclusions: (1) the SpsGuard is the fix for this
+stream, and it now replicates the player's call faithfully
+(start-code prepend, offset 4, vps=null) — regression test with
+house-4's real SPS added (guard must veto; a standard x265 SPS must
+pass). (2) A vetoed stream now degrades to the ladder's last resort —
+snapshot photo polling via the family template — instead of only an
+error tile (LAN only; relay serves no snapshots). (3) Media3 stays at
+1.8.1 (newer lines verified not to fix this and would force a
+compileSdk-36 cascade for nothing).

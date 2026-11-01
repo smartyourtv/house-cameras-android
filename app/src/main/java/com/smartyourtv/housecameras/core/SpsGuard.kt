@@ -55,16 +55,26 @@ object SpsGuard {
 
     /** True = the parser handled this SPS (or there was nothing to
      *  check). False = the parser THREW: this stream must not be
-     *  handed to the player. Mirrors RtspMediaTrack's order: VPS, then SPS. */
+     *  handed to the player.
+     *
+     *  This replicates RtspMediaTrack's EXACT call (verified against
+     *  the 1.4.1 and 1.8.1 sources): the fmtp value is Base64-decoded,
+     *  a 4-byte start code is PREPENDED (even if the camera's value
+     *  already carries one — house-4's does, which is how its 37-byte
+     *  SPS becomes the 41-byte array in the crash), and the parser is
+     *  called as parseH265SpsNalUnit(data, offset=4, length, vps=null).
+     *  Verified 2026-11-01 against house-4's real SPS: this call throws
+     *  ArrayIndexOutOfBounds(41) on Media3 1.4.1, 1.8.1, 1.9.4 AND
+     *  1.11.1 — no released Media3 parses it — while a standard x265
+     *  SPS parses clean. The guard's veto is the fix for that stream. */
     fun h265SpsParses(vpsB64: String?, spsB64: String?): Boolean {
         if (spsB64.isNullOrEmpty()) return true
         return try {
-            val vpsData = if (!vpsB64.isNullOrEmpty()) {
-                val vps = Base64.getDecoder().decode(vpsB64)
-                try { NalUnitUtil.parseH265VpsNalUnit(vps, 0, vps.size) } catch (_: Throwable) { null }
-            } else null
-            val sps = Base64.getDecoder().decode(spsB64)
-            NalUnitUtil.parseH265SpsNalUnit(sps, 0, sps.size, vpsData)
+            val decoded = Base64.getDecoder().decode(spsB64)
+            val initData = ByteArray(decoded.size + 4)
+            initData[3] = 1
+            System.arraycopy(decoded, 0, initData, 4, decoded.size)
+            NalUnitUtil.parseH265SpsNalUnit(initData, 4, initData.size, null)
             true
         } catch (_: Throwable) { false }
     }

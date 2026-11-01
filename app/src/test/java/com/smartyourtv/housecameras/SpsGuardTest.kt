@@ -31,6 +31,18 @@ class SpsGuardTest {
         assertTrue(SpsGuard.h265SpsParses(vps, sps))
     }
 
+    @Test fun house4RealSpsIsVetoed() {
+        // house-4's ACTUAL sprop values (anonymous DESCRIBE of
+        // rtsp://192.168.40.190:554/12, pulled 2026-11-01 by the
+        // Mechanic lane). This SPS crashes Media3's parser with
+        // ArrayIndexOutOfBounds length=41/index=41 on 1.4.1, 1.8.1,
+        // 1.9.4 and 1.11.1 (verified in a JVM harness replicating
+        // RtspMediaTrack's exact call). The guard MUST veto it.
+        val h4vps = "AAAAAUABDAH//wFgAAADALAAAAMAAAMAWqwJ"
+        val h4sps = "AAAAAUIBAQFgAAADALAAAAMAAAMAWqAGQgHBY2u5MvzcFBgUAg=="
+        assertFalse(SpsGuard.h265SpsParses(h4vps, h4sps))
+    }
+
     @Test fun garbageSpsIsContainedNotFatal() {
         // Random bytes where an SPS should be: the guard must answer
         // "does not parse" (or accept) — but never throw out of the guard.
