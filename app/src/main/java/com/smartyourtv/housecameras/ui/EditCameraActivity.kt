@@ -86,7 +86,8 @@ class EditCameraActivity : Activity() {
             del.setOnClickListener { cfg.cameras.removeAt(idx); Store.save(this@EditCameraActivity, cfg); finish() }
             root.addView(del)
         }
-        root.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        root.layoutParams = android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
     private fun readBack(cam: Camera, nameF: EditText, hostF: EditText, families: List<String>,

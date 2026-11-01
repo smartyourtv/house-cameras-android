@@ -64,6 +64,22 @@ object Reports {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             try { write(appCtx, "Uncaught exception in ${thread.name}", error) } catch (_: Exception) {}
+            // CONTAINMENT (v1.0.4): a failure inside the media library
+            // on one of ITS OWN background threads (the W2 house-4
+            // crash: Media3's RTSP thread died parsing an H.265 SPS)
+            // must never take the whole process down. The report above
+            // is already written; for a background-thread media3
+            // failure we simply do not chain to the system killer.
+            // The affected tile goes dark / shows its status; every
+            // other camera keeps working. Main-thread failures and
+            // non-media failures keep the normal crash path.
+            val fromMediaLib = error.stackTraceToString().contains("androidx.media3")
+            val isMainThread = thread === android.os.Looper.getMainLooper()?.thread
+            if (fromMediaLib && !isMainThread) {
+                android.util.Log.e("HouseCameras",
+                    "Contained media-library failure on ${thread.name}: ${error.javaClass.simpleName}")
+                return@setDefaultUncaughtExceptionHandler
+            }
             previous?.uncaughtException(thread, error)
         }
     }

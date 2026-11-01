@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.smartyourtv.housecameras"
-    compileSdk = 34
-    buildToolsVersion = "34.0.0"
+    compileSdk = 35
+    buildToolsVersion = "35.0.0"
     defaultConfig {
         applicationId = "com.smartyourtv.housecameras"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 102
-        versionName = "1.0.2"
+        targetSdk = 35
+        versionCode = 104
+        versionName = "1.0.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val kf = System.getenv("KEYSTORE_FILE_PATH"); val kp = System.getenv("KEYSTORE_PASSWORD")
@@ -36,8 +36,8 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-exoplayer-rtsp:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-exoplayer:1.8.1")
+    implementation("androidx.media3:media3-exoplayer-rtsp:1.8.1")
+    implementation("androidx.media3:media3-ui:1.8.1")
     testImplementation("junit:junit:4.13.2")
 }

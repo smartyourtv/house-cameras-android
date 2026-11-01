@@ -61,3 +61,23 @@
    (the local SDK has no 35 build-tools; recorded as an environment
    deviation, no user-facing effect).
 Result: PASS — proceed to signed release build.
+
+## v1.0.4 — crash containment + Media3 H.265 fix (2026-11-01)
+Field crash: on the W2, house-4's HEVC sub-stream SPS crashed Media3
+1.4.1's parser (uncaught ArrayIndexOutOfBounds on the RTSP thread,
+app dead <1 s after every launch; reports in the W2's Downloads).
+Change-impact: (1) Media3 1.4.1 → 1.8.1 (parser hardening line;
+compileSdk/targetSdk 34 → 35, build-tools 35 installed into the local
+SDK); no new permissions; no UI changes. (2) New SpsGuard pre-flight:
+one extra RTSP DESCRIBE per stream start (the same request the player
+itself makes), SPS parsed on a controlled thread; a vetoed stream
+never starts a player. (3) Crash handler: background-thread media3
+failures are reported and contained, not chained to the system
+killer; main-thread and non-media failures keep the normal path.
+(4) Carries the v1.0.3 edit-screen LayoutParams fix from the tree.
+Blast radius: this app only. Rollback: reinstall 1.0.3 (config format
+unchanged). Tests: 12/12 unit tests incl. SpsGuard SDP parsing, a
+genuine x265 SPS parse, and a truncation fuzz proving the guard never
+throws. Live-stream parser verification: W2 launch after install
+(Mechanic lane) — house-4 tile Live proves it end-to-end; an error
+tile with the app alive proves containment instead.

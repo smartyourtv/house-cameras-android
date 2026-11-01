@@ -15,6 +15,7 @@ import androidx.media3.ui.PlayerView
 import com.smartyourtv.housecameras.core.Camera
 import com.smartyourtv.housecameras.core.CameraSource
 import com.smartyourtv.housecameras.core.RelayConfig
+import com.smartyourtv.housecameras.core.SpsGuard
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
@@ -50,12 +51,27 @@ class CameraPlayer(
     fun attachToPlayerView(view: PlayerView) {
         viewRef = view
         attempts = 0
-        startPlayer()
+        onStatus("Connecting…", lastGoodFrameAt)
+        // CONTAINMENT (v1.0.4): before any player starts, pre-flight the
+        // stream's H.265 SPS through the same parser Media3 will run.
+        // A stream that breaks the parser becomes an error tile — it
+        // can never take the app down. Inconclusive checks proceed.
+        thread(name = "sps-guard-${cam.name}") {
+            val safe = try { SpsGuard.streamIsSafe(cam, source, relay) } catch (_: Throwable) { true }
+            handler.post {
+                if (stopped) return@post
+                if (!safe) {
+                    onStatus("This camera's picture format isn't supported by the player yet — " +
+                             "your other cameras still work.", lastGoodFrameAt)
+                } else startPlayer()
+            }
+        }
     }
 
     private fun startPlayer() {
         if (stopped) return
         val view = viewRef ?: return
+        try {
         try { player?.release() } catch (_: Exception) {}
         val p = ExoPlayer.Builder(ctx).build()
         player = p
@@ -86,6 +102,11 @@ class CameraPlayer(
         })
         p.prepare(); p.playWhenReady = true
         onStatus(if (attempts == 0) "Connecting…" else "Reconnecting…", lastGoodFrameAt)
+        } catch (t: Throwable) {
+            // Containment: a player that fails to even start becomes an
+            // error tile via the retry path, never a crash.
+            scheduleRetry(t.javaClass.simpleName)
+        }
     }
 
     private fun scheduleRetry(reason: String) {
