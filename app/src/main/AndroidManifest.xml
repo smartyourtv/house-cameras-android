@@ -5,8 +5,15 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- TV boxes (the W2) are a first-class home for this app: leanback
+         support declared, but neither leanback nor a touchscreen is
+         REQUIRED, so phones install it too. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <application
         android:label="House Cameras"
+        android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/banner"
         android:theme="@android:style/Theme.Material"
         android:usesCleartextTraffic="true"
         android:allowBackup="false">
@@ -22,6 +29,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
         <activity android:name=".ui.SingleActivity" android:exported="false" />
