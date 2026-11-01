@@ -15,11 +15,9 @@ import androidx.media3.ui.PlayerView
 import com.smartyourtv.housecameras.core.Camera
 import com.smartyourtv.housecameras.core.CameraSource
 import com.smartyourtv.housecameras.core.RelayConfig
+import com.smartyourtv.housecameras.core.HttpFetch
 import com.smartyourtv.housecameras.core.SpsGuard
 import com.smartyourtv.housecameras.core.Templates
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.Base64
 import kotlin.concurrent.thread
 
 /** Plays one camera source. RTSP goes to ExoPlayer with letterbox
@@ -161,32 +159,55 @@ class CameraPlayer(
         image.scaleType = ImageView.ScaleType.FIT_CENTER
         val startedAt = System.currentTimeMillis()
         var vetoReported = false
+        // Candidate snapshot paths (template first, then the paths the
+        // fleet is known to answer, then the generic library). The
+        // first path that returns a real picture is remembered and
+        // used directly from then on. Fetches answer the camera's
+        // 401 challenge (Basic or Digest) with the stored credentials.
+        val candidates = if (vetoFallback) HttpFetch.snapshotCandidates(snapSource.path)
+                         else listOf(snapSource.path)
+        var workingPath: String? = null
+        var sawAuthRequired = false
         pollThread = thread(name = "snap-${cam.name}") {
             while (!stopped) {
-                try {
-                    val conn = URL("http://${cam.host}${snapSource.path}").openConnection() as HttpURLConnection
-                    conn.connectTimeout = 1500; conn.readTimeout = 2000
-                    if (cam.credentials.hasLogin()) {
-                        val basic = Base64.getEncoder().encodeToString(
-                            "${cam.credentials.username}:${cam.credentials.password}".toByteArray())
-                        conn.setRequestProperty("Authorization", "Basic $basic")
-                    }
-                    val bytes = conn.inputStream.readBytes()
-                    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    if (bmp != null) {
-                        lastGoodFrameAt = System.currentTimeMillis()
-                        Handler(Looper.getMainLooper()).post {
-                            if (!stopped) { image.setImageBitmap(bmp); onStatus("Live (photos)", lastGoodFrameAt) }
+                var gotFrame = false
+                val pathsToTry = if (workingPath != null) listOf(workingPath!!) else candidates
+                for (path in pathsToTry) {
+                    if (stopped) break
+                    val res = HttpFetch.get("http://${cam.host}$path",
+                        cam.credentials.username, cam.credentials.password)
+                    when (res.outcome) {
+                        HttpFetch.Outcome.OK -> {
+                            val bytes = res.bytes
+                            val bmp = if (bytes != null) BitmapFactory.decodeByteArray(bytes, 0, bytes.size) else null
+                            if (bmp != null) {
+                                workingPath = path; gotFrame = true
+                                lastGoodFrameAt = System.currentTimeMillis()
+                                Handler(Looper.getMainLooper()).post {
+                                    if (!stopped) { image.setImageBitmap(bmp); onStatus("Live (photos)", lastGoodFrameAt) }
+                                }
+                                break
+                            }
                         }
-                    } else if (!vetoFallback) onStatus("No signal", lastGoodFrameAt)
-                } catch (_: Exception) {
-                    if (!stopped && !vetoFallback) onStatus("No signal", lastGoodFrameAt)
+                        HttpFetch.Outcome.AUTH_REQUIRED -> sawAuthRequired = true
+                        else -> { /* try the next candidate */ }
+                    }
                 }
+                if (!gotFrame && !vetoFallback && !stopped) onStatus("No signal", lastGoodFrameAt)
                 if (vetoFallback && !vetoReported && lastGoodFrameAt == 0L &&
                     System.currentTimeMillis() - startedAt > 10000) {
                     vetoReported = true
-                    onStatus("This camera's video format isn't supported by the player yet, and photos " +
-                             "aren't available either — your other cameras still work.", lastGoodFrameAt)
+                    onStatus(when {
+                        sawAuthRequired && !cam.credentials.hasLogin() ->
+                            "This camera's video format isn't supported by the player yet, and its photos " +
+                            "need the camera's password — press and hold this tile and add the password in its settings."
+                        sawAuthRequired ->
+                            "This camera's video format isn't supported by the player yet, and the password " +
+                            "saved for it didn't open its photos — press and hold this tile to check the password."
+                        else ->
+                            "This camera's video format isn't supported by the player yet, and photos " +
+                            "aren't available either — your other cameras still work."
+                    }, lastGoodFrameAt)
                 }
                 try { Thread.sleep(2000) } catch (_: InterruptedException) { break }
             }

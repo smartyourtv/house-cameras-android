@@ -97,3 +97,16 @@ snapshot photo polling via the family template — instead of only an
 error tile (LAN only; relay serves no snapshots). (3) Media3 stays at
 1.8.1 (newer lines verified not to fix this and would force a
 compileSdk-36 cascade for nothing).
+
+## v1.0.7 — snapshot fallback v2 (2026-11-01)
+W2 field result on 1.0.5: house-4 photos failed — /snapshot.jpg is
+404 on this camera; its snapshot endpoints (/snap.jpg,
+/tmpfs/auto.jpg, /cgi-bin/snapshot.cgi, /cgi-bin/media.cgi?...)
+answer 401 (the fleet's HTTP login; RTSP stays anonymous). Fallback
+now rotates candidate paths (template → verified fleet paths →
+generic library), answers Basic/Digest challenges with the tile's
+stored credentials (new core/HttpFetch; RFC-anchored unit tests),
+remembers the winning path, and — when the endpoints demand a login
+and none is stored — the tile says so plainly with the remedy
+(press-and-hold → add the camera password) instead of a generic
+failure. Carries the 1.0.6 leanback fix unchanged.
