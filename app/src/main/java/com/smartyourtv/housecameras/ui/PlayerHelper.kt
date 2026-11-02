@@ -40,6 +40,8 @@ class CameraPlayer(
     private val relay: RelayConfig,
     private val singleView: Boolean = false,
     private val steady: Boolean = true,
+    private val sourceLabelOverride: String? = null,
+    private val downMessage: String? = null,
     private val onHostHealed: (() -> Unit)? = null,
     private val onStatus: (String, Long) -> Unit
 ) {
@@ -76,7 +78,8 @@ class CameraPlayer(
         val st = com.smartyourtv.housecameras.core.LiveState.state(cam.name)
         st.stateWord = s; st.host = cam.host
         st.identityAnchor = cam.identity.anchorDescription()
-        st.sourceLabel = when { relay.active() -> "Relay"; photosMode -> "Photos"; else -> "Direct" }
+        st.sourceLabel = sourceLabelOverride
+            ?: when { relay.active() -> "Relay"; photosMode -> "Photos"; else -> "Direct" }
         st.lastFrameAt = lastGoodFrameAt
         st.restartsThisHour = policy.restartsThisHour()
         st.roadWord = meter.quality()
@@ -256,7 +259,7 @@ class CameraPlayer(
             val delay = policy.nextDelayMs() +
                 com.smartyourtv.housecameras.core.Breaker.extraDelayMs(System.currentTimeMillis())
             if (policy.inSlowLane) {
-                status("No signal — still trying every minute (last problem: $reason)")
+                status(downMessage ?: "No signal — still trying every minute (last problem: $reason)")
                 if (!wasSlow && !resolveTriedInSlowLane) {
                     // Burst spent with no picture: maybe the camera
                     // MOVED. Ask the resolver once per slow-lane entry.

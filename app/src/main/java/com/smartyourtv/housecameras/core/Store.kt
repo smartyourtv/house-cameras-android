@@ -79,6 +79,10 @@ object Store {
         }
         return JSONObject().put("cameras", arr)
             .put("steadyPicture", cfg.steadyPicture)
+            .put("homeView", cfg.homeView)
+            .put("bootToCameras", cfg.bootToCameras)
+            .put("dvr", JSONObject().put("host", cfg.dvr.host)
+                .put("port", cfg.dvr.port).put("channels", cfg.dvr.channels))
             .put("relay", JSONObject()
                 .put("enabled", cfg.relay.enabled).put("host", cfg.relay.host)
                 .put("port", cfg.relay.port).put("httpPort", cfg.relay.httpPort)
@@ -108,6 +112,12 @@ object Store {
             Crypto.unprotect(r.optString("sessionToken")))
         cfg.lastNotifiedVersionCode = root.optInt("lastNotifiedVersionCode", 0)
         cfg.steadyPicture = root.optBoolean("steadyPicture", true)
+        cfg.homeView = root.optString("homeView", "HOUSE")
+        cfg.bootToCameras = root.optBoolean("bootToCameras", true)
+        val dv = root.optJSONObject("dvr")
+        if (dv != null) cfg.dvr = DvrConfig(
+            dv.optString("host").ifEmpty { "192.168.40.189" },
+            dv.optInt("port", 8554), dv.optInt("channels", 4))
         return cfg
     }
 

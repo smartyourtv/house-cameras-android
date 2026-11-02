@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -13,20 +15,30 @@ import com.smartyourtv.housecameras.BuildConfig
 import com.smartyourtv.housecameras.core.*
 import kotlin.concurrent.thread
 
+/** The stage (v2 P2). Banked pattern: the stage comes first — tall,
+ *  leading the layout — and the grids are exact-fill: HOUSE 3×2,
+ *  DVR one row of 4, ALL 5×2. Tiles are D-pad focusable with a
+ *  visible focus frame; OK/tap opens the big view, Back returns.
+ *  Identity resolution runs before every stage build (P1), so a
+ *  camera that moved is found by who it is before any tile starts. */
 class MainActivity : Activity() {
     private lateinit var cfg: AppConfig
     private val players = mutableListOf<CameraPlayer>()
-    private lateinit var grid: GridLayout
+    private lateinit var stage: LinearLayout
     private lateinit var modeLabel: TextView
+    private lateinit var banner: TextView
+    private var view: StageSpec.View = StageSpec.HOUSE
+    private var resolving = false
+    private val uiHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Reports.installCrashHandler(this)
         cfg = Store.load(this)
+        view = StageSpec.byName(cfg.homeView)
         title = "House Cameras"
         buildUi()
         checkForUpdateQuietly()
-        window.decorView.post(bannerTick)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -34,8 +46,15 @@ class MainActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(6), dp(8), dp(6)) }
-        modeLabel = TextView(this).apply { setTextColor(Color.WHITE); textSize = 15f }
+        modeLabel = TextView(this).apply { setTextColor(Color.WHITE); textSize = 14f }
         bar.addView(modeLabel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        for (v in StageSpec.VIEWS) {
+            val b = Button(this).apply {
+                text = v.label
+                setOnClickListener { switchView(v) }
+            }
+            bar.addView(b)
+        }
         fun menuBtn(label: String, act: () -> Unit) = Button(this).apply {
             text = label; setOnClickListener { act() }
         }
@@ -44,138 +63,211 @@ class MainActivity : Activity() {
         bar.addView(menuBtn("Settings") { startActivity(Intent(this, SettingsActivity::class.java)) })
         bar.addView(menuBtn("Status") { startActivity(Intent(this, DiagnosticsActivity::class.java)) })
         root.addView(bar)
-        val banner = TextView(this).apply {
+        banner = TextView(this).apply {
             setTextColor(Color.rgb(255, 200, 90)); textSize = 13f
             setPadding(dp(8), dp(2), dp(8), dp(2)); visibility = View.GONE
         }
-        banner.id = 992; root.addView(banner)
-        val honest = TextView(this).apply {
-            setTextColor(Color.LTGRAY); textSize = 12f; setPadding(dp(8), 0, dp(8), dp(4))
-            text = "Some cameras can't be added: ones that only work through a company cloud app " +
-                   "(like Ring, Blink, or Nest) don't send a picture on your home network, so there is nothing for this app to show."
-            visibility = View.GONE
-        }
-        honest.id = 991; root.addView(honest)
-        val scroll = ScrollView(this)
-        grid = GridLayout(this).apply { columnCount = 2 }
-        scroll.addView(grid)
-        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(banner)
+        stage = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
         refreshModeLabel()
     }
 
     private fun refreshModeLabel() {
         modeLabel.text = if (cfg.relay.active())
-            "Away mode — through the home relay (${cfg.relay.host})"
+            "Away — through the home relay"
         else "At home — direct from your cameras"
     }
 
-    private var resolving = false
+    private fun switchView(v: StageSpec.View) {
+        if (v == view && players.isNotEmpty()) return
+        view = v
+        cfg.homeView = v.name
+        Store.save(this, cfg)
+        buildStage()
+    }
+
+    private val bannerTick = object : Runnable {
+        override fun run() {
+            val msg = LiveState.breakerMessage
+            banner.text = msg
+            banner.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
+            uiHandler.postDelayed(this, 3000)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         cfg = Store.load(this)
+        view = StageSpec.byName(cfg.homeView)
         refreshModeLabel()
         players.forEach { it.release() }; players.clear()
-        grid.removeAllViews()
-        // v2: identity resolution runs BEFORE the grid is built, so a
-        // camera that moved in a power-cycle shuffle is found by who
-        // it is, not by the address it used to have. Fast paths are
-        // quick; a sweep runs only for dead/stranger addresses.
+        stage.removeAllViews()
+        uiHandler.removeCallbacks(bannerTick); uiHandler.post(bannerTick)
         if (resolving) return
         resolving = true
         Resolver.resolveAsync(this, cfg) { changed ->
             runOnUiThread {
                 resolving = false
                 if (changed) Store.save(this, cfg)
-                buildGrid()
+                buildStage()
             }
-        }
-    }
-
-    private val bannerTick = object : Runnable {
-        override fun run() {
-            val b = findViewById<TextView>(992)
-            val msg = LiveState.breakerMessage
-            if (b != null) {
-                b.text = msg
-                b.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
-            }
-            window.decorView.postDelayed(this, 3000)
         }
     }
 
     override fun onPause() {
         super.onPause()
+        uiHandler.removeCallbacks(bannerTick)
         players.forEach { it.release() }; players.clear()
     }
 
-    private fun buildGrid() {
-        grid.removeAllViews()
-        val enabled = cfg.cameras.filter { it.enabled }
-        val cellW = (resources.displayMetrics.widthPixels / 2) - dp(12)
-        val cellH = (cellW * 0.72).toInt()
-        for ((idx, cam) in cfg.cameras.withIndex()) {
-            if (!cam.enabled) continue
-            val cell = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(4), dp(4), dp(4))
-                setBackgroundColor(Color.rgb(24, 24, 24))
+    /** The DVR pseudo-cameras: built in memory per view from the
+     *  feed config — never saved into the camera list, so identity
+     *  and resolver logic never touch them. */
+    private fun dvrCameras(): List<Camera> = (0 until cfg.dvr.channels).map { ch ->
+        val src = CameraSource(kind = "rtsp", path = cfg.dvr.path(ch),
+            port = cfg.dvr.port, via = "relay")
+        Camera(name = "dvr-${ch + 1}", host = cfg.dvr.host, family = "generic",
+            main = src, sub = src, notes = "Van DVR channel ${ch + 1} — through the laptop relay")
+    }
+
+    private data class Tile(val cam: Camera, val cfgIndex: Int, val dvrChannel: Int)
+
+    private fun tilesForView(): List<Tile?> {
+        val house = cfg.cameras.withIndex().filter { it.value.enabled }
+            .map { Tile(it.value, it.index, -1) }
+        val dvr = dvrCameras().mapIndexed { ch, cam -> Tile(cam, -1, ch) }
+        val slots: List<Tile> = when (view) {
+            StageSpec.DVR -> dvr
+            StageSpec.ALL -> (house.take(6) + dvr).take(StageSpec.tiles(StageSpec.ALL))
+            else -> house.take(StageSpec.tiles(StageSpec.HOUSE))
+        }
+        val out = mutableListOf<Tile?>()
+        out.addAll(slots)
+        while (out.size < StageSpec.tiles(view)) out.add(null)
+        return out
+    }
+
+    private fun buildStage() {
+        players.forEach { it.release() }; players.clear()
+        stage.removeAllViews()
+        val tiles = tilesForView()
+        var firstTile: View? = null
+        for (r in 0 until view.rows) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            stage.addView(row, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            for (c in 0 until view.cols) {
+                val tile = tiles[r * view.cols + c]
+                val cell = buildTile(tile)
+                row.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                if (firstTile == null && tile != null) firstTile = cell
             }
-            val status = TextView(this).apply { setTextColor(Color.LTGRAY); textSize = 12f; text = "${cam.name} — starting…" }
-            val source = if (cam.sub.path.isNotEmpty()) cam.sub else cam.main
-            val relayed = cfg.relay.active() && cam.name.matches(Regex("house-[1-6]"))
-            if (cfg.relay.active() && !relayed) {
-                val tv = TextView(this).apply {
+        }
+        if (isTelevision(this)) firstTile?.post { firstTile.requestFocus() }
+    }
+
+    private fun buildTile(tile: Tile?): View {
+        val wrap = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(10, 10, 10))
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        }
+        val inner = FrameLayout(this)
+        wrap.addView(inner, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (tile == null) {
+            inner.addView(TextView(this).apply {
+                setTextColor(Color.DKGRAY); gravity = Gravity.CENTER; textSize = 12f
+                text = "Nothing here yet"
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            return wrap
+        }
+        val cam = tile.cam
+        val status = TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 11f; maxLines = 2
+            setBackgroundColor(Color.argb(160, 0, 0, 0))
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+            text = "${cam.name} — starting…"
+        }
+        val statusLp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.BOTTOM
+        }
+        val isDvr = tile.dvrChannel >= 0
+        val source = if (isDvr) cam.main
+                     else if (cam.sub.path.isNotEmpty()) cam.sub else cam.main
+        val relayedHouse = cfg.relay.active() && !isDvr &&
+            cam.name.matches(Regex("house-[1-6]"))
+        when {
+            cfg.relay.active() && !relayedHouse -> {
+                inner.addView(TextView(this).apply {
                     setTextColor(Color.GRAY); gravity = Gravity.CENTER; textSize = 13f
-                    text = "Not part of remote viewing — the home relay carries house-1 to house-6 only."
-                }
-                cell.addView(tv, LinearLayout.LayoutParams(cellW, cellH))
+                    text = if (isDvr) "The DVR isn't part of remote viewing."
+                           else "Not part of remote viewing — the home relay carries house-1 to house-6 only."
+                }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                 status.text = "${cam.name} — at-home only"
-            } else if (!cfg.relay.active() && (source.kind == "snapshot" || source.kind == "mjpeg")) {
+            }
+            !cfg.relay.active() && !isDvr && (source.kind == "snapshot" || source.kind == "mjpeg") -> {
                 val img = ImageView(this)
-                cell.addView(img, LinearLayout.LayoutParams(cellW, cellH))
+                inner.addView(img, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                 val cp = CameraPlayer(this, cam, source, cfg.relay,
                     steady = cfg.steadyPicture,
                     onHostHealed = { Store.save(this, cfg) }) { s, _ ->
                     runOnUiThread { status.text = "${cam.name} — $s" }
                 }
                 players.add(cp); cp.startSnapshotPolling(img)
-            } else if (cam.host.isEmpty() && !cfg.relay.active()) {
-                val tv = TextView(this).apply {
+            }
+            cam.host.isEmpty() && !cfg.relay.active() -> {
+                inner.addView(TextView(this).apply {
                     setTextColor(Color.GRAY); gravity = Gravity.CENTER; textSize = 13f
                     text = "Not set up yet — this camera hasn't been found on the network."
-                }
-                cell.addView(tv, LinearLayout.LayoutParams(cellW, cellH))
+                }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                 status.text = "${cam.name} — not set up"
-            } else {
-                val frame = android.widget.FrameLayout(this)
+            }
+            else -> {
                 val pv = PlayerView(this)
                 val fallbackImg = ImageView(this).apply { visibility = View.GONE }
-                frame.addView(pv, android.widget.FrameLayout.LayoutParams(cellW, cellH))
-                frame.addView(fallbackImg, android.widget.FrameLayout.LayoutParams(cellW, cellH))
-                cell.addView(frame)
-                val cp = CameraPlayer(this, cam, source, cfg.relay,
+                inner.addView(pv, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                inner.addView(fallbackImg, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                val cp = if (isDvr) CameraPlayer(this, cam, source, cfg.relay,
+                    steady = cfg.steadyPicture,
+                    sourceLabelOverride = "Relay",
+                    downMessage = "DVR feed is down — the van DVR's link at home is off right now. " +
+                                  "The app keeps checking and the picture will appear on its own when the feed returns."
+                ) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
+                else CameraPlayer(this, cam, source, cfg.relay,
                     steady = cfg.steadyPicture,
                     onHostHealed = { Store.save(this, cfg) }) { s, _ ->
                     runOnUiThread { status.text = "${cam.name} — $s" }
                 }
                 players.add(cp); cp.attachToPlayerView(pv, fallbackImg)
             }
-            cell.addView(status)
-            cell.setOnClickListener { openSingle(idx) }
-            cell.setOnLongClickListener { openEdit(idx); true }
-            grid.addView(cell)
         }
-        if (enabled.isEmpty()) {
-            val tv = TextView(this).apply {
-                setTextColor(Color.WHITE); textSize = 16f; setPadding(dp(16), dp(16), dp(16), dp(16))
-                text = "No cameras are turned on yet. Tap Add to add one, or Find cameras to search your home network."
-            }
-            grid.addView(tv)
+        inner.addView(status, statusLp)
+        wrap.isFocusable = true
+        wrap.isClickable = true
+        wrap.setOnFocusChangeListener { v, has ->
+            v.setBackgroundColor(if (has) Color.rgb(20, 83, 45) else Color.rgb(10, 10, 10))
         }
+        wrap.setOnClickListener {
+            if (isDvr) openDvr(tile.dvrChannel) else openSingle(tile.cfgIndex)
+        }
+        wrap.setOnLongClickListener {
+            if (!isDvr) { openEdit(tile.cfgIndex); true } else false
+        }
+        return wrap
     }
 
     private fun openSingle(index: Int) {
         val i = Intent(this, SingleActivity::class.java); i.putExtra("index", index); startActivity(i)
+    }
+    private fun openDvr(channel: Int) {
+        val i = Intent(this, SingleActivity::class.java)
+        i.putExtra("dvrChannel", channel); startActivity(i)
     }
     private fun openEdit(index: Int) {
         val i = Intent(this, EditCameraActivity::class.java); i.putExtra("index", index); startActivity(i)
@@ -184,7 +276,6 @@ class MainActivity : Activity() {
     private fun checkForUpdateQuietly() {
         thread(name = "updater-check") {
             val avail = Updater.check(BuildConfig.VERSION_CODE) ?: return@thread
-            // One subtle notice per version (standing law).
             if (cfg.lastNotifiedVersionCode >= avail.versionCode) return@thread
             cfg.lastNotifiedVersionCode = avail.versionCode
             Store.save(this, cfg)

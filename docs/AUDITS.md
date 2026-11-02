@@ -146,3 +146,36 @@ LiveState is concurrent; supervisors stay on the main Handler as in
 v1. Tests: Identity/RoadMeter/RestartPolicy/Breaker unit suites +
 the carried 16. Phase gate: P1 APK to dist only — no release, no
 version.json move; 1.0.7 remains the fleet build until P3 proof.
+
+## DVR supply note (2026-11-02)
+No static DVR stream URL exists (CMSV7 session URLs, hours-long
+life, minted laptop-side only; on-device account credentials NOT
+approved). DVR tiles are therefore relay-fed by design (laptop LAN
+relay, /dvr-1../dvr-4, source labeled Relay) with an honest
+feed-down state until the laptop DVR leg (down since 2026-10-23) is
+revived by its own lane. Recorded in DESIGN-V2.md.
+
+## v2.0.0 P2 — stage UI + D-pad + boot (2026-11-02)
+CHANGE-IMPACT: MainActivity's scrolling 2-wide grid is replaced by
+the stage UI (banked pattern: tall stage, exact-fill; HOUSE 3x2,
+DVR one row of 4, ALL 5x2; status becomes an in-tile overlay).
+Views persist (AppConfig.homeView). DVR view = four pseudo-cameras
+fed from the laptop LAN relay (DvrConfig host/port, paths
+/dvr-1../dvr-4, source labeled Relay, honest feed-down status via
+a supervisor down-message; slow-lane probe keeps the row able to
+light up when the feed returns). D-pad: tiles focusable with a
+visible focus frame; OK opens single view (DVR tiles pass an intent
+contract to SingleActivity); top-bar buttons already focusable.
+Boot: BootReceiver (BOOT_COMPLETED + QUICKBOOT_POWERON) launches
+the grid when AppConfig.bootToCameras is on AND the device is a TV
+(UiModeManager check); phones never boot-launch. New permission:
+RECEIVE_BOOT_COMPLETED (normal, no user prompt). Settings gains the
+boot toggle + DVR feed fields. PlayerHelper gains two optional
+params (sourceLabelOverride, downMessage) — defaults preserve P1
+behavior everywhere else. Blast radius: this app only; rollback
+unchanged (1.0.7 published; P1/P2 builds stay in dist unpublished).
+PRE-BUILD: focus traversal verified by construction (explicit
+focusable cells, first tile requests focus on TV); boot receiver
+exported=true with the boot permission as Android requires;
+DVR pseudo-cameras never enter the saved config (built in memory
+per view) so identity/resolver logic is untouched by them.

@@ -100,6 +100,18 @@ data class RelayConfig(
     companion object { const val USERNAME = "scout" }
 }
 
+/** The van DVR's published feed (v2 P2): the laptop publishes the
+ *  DVR channels on its LAN camera relay; the app consumes them.
+ *  There is deliberately NO CMSV7 anything here — no session, no
+ *  account credentials on-device (owner ruling 2026-11-02). */
+data class DvrConfig(
+    var host: String = "192.168.40.189",   // laptop LAN address (same relay that serves house-4's transcode)
+    var port: Int = 8554,                  // mediamtx RTSP default; confirm with the Laptop lane when the leg is revived
+    var channels: Int = 4
+) {
+    fun path(channel: Int) = "/dvr-${channel + 1}"
+}
+
 data class AppConfig(
     var cameras: MutableList<Camera> = mutableListOf(),
     var relay: RelayConfig = RelayConfig(),
@@ -107,7 +119,14 @@ data class AppConfig(
     /** Owner ruling 2026-11-02: "Steady picture" — ON = deep buffer
      *  (grid ~10 s, single ~4 s) to ride out a shaky road; OFF =
      *  lowest latency. Default ON. Read at stream start. */
-    var steadyPicture: Boolean = true
+    var steadyPicture: Boolean = true,
+    /** Stage view last shown: HOUSE | DVR | ALL (v2 P2). */
+    var homeView: String = "HOUSE",
+    /** Boot-straight-to-cameras on TV boxes (owner ruling: receiver
+     *  first; default ON — the receiver itself checks the device is
+     *  a TV, so phones never boot-launch). */
+    var bootToCameras: Boolean = true,
+    var dvr: DvrConfig = DvrConfig()
 )
 
 /** Redact anything that looks like a credential-bearing URL before it

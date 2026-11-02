@@ -187,6 +187,39 @@ copy; fleet signing key and the GitHub + version.json ship routine.
   ready-before-call-out rule applies).
 - P4 — hardening from field results; fleet rollout call by HQ.
 
+## DVR — supplied facts and the design consequence (2026-11-02, via Main/Mechanic)
+
+There is NO static stream URL for the DVR, and there never will be
+one on the app side: the van's JOINLGO DVR (CMSV7 device 104996)
+addresses streams through the vendor's cloud gateway with URLs
+embedding a CMSV7 session id that expires within hours and is
+re-minted laptop-side (ThinkPad Waydroid). The app does NOT mint
+its own session — account credentials on-device are NOT approved.
+
+Design: the four DVR tiles are RELAY-fed, house-4-style. The laptop
+publishes the DVR feed on its LAN camera relay (the mediamtx that
+already serves house-4's transcode), paths /dvr-1 … /dvr-4
+(configurable host/paths in Settings, defaults to be confirmed with
+the Laptop lane when the leg is revived). Tiles label their source
+"Relay" (LiveState already carries the label). The app probes the
+feed honestly: until the laptop leg is revived (DOWN since
+2026-10-23; a separate job, not this lane's, and it does not jump
+the God's Eye queue), every DVR tile renders the plain state "DVR
+feed is down — the van DVR's link at home is off right now," and
+the supervisor keeps a slow-lane probe so the row lights up by
+itself when the feed returns. No fake tiles, ever. In the ALL view,
+house tiles stay Direct and DVR tiles say Relay — per-tile honesty.
+Away mode: DVR is out of scope (the Away relay carries house-1..6)
+unless HQ extends it.
+
+## Fleet priority (owner ruling 2026-11-02, via Main)
+
+God's Eye keeps TOP priority across the fleet. Camera v2 proceeds
+in parallel as a separate lane; if HQ attention must choose, God's
+Eye wins and camera phase gates may slide. The pre-Dad target
+(field-proven on the W2 before Nov 16) is the aim, not a suicide
+pact.
+
 ## Owner rulings (2026-11-02, via Main)
 
 1. DVR details: requested from the Mechanic lane; arrive via Main.

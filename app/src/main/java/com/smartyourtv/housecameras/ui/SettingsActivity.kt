@@ -67,8 +67,34 @@ class SettingsActivity : Activity() {
                    "but a shaky connection will show as stutter. Changing this re-opens the camera streams — no restart needed."
         })
 
+        root.addView(TextView(this).apply { text = "On a TV box"; textSize = 17f })
+        val bootBox = CheckBox(this).apply {
+            text = "Open the cameras by themselves when the TV box turns on"
+            isChecked = cfg.bootToCameras
+        }
+        root.addView(bootBox)
+        root.addView(TextView(this).apply {
+            textSize = 13f
+            text = "For a TV box in the garage or living room: when it powers up, it goes straight to the cameras. " +
+                   "This does nothing on a phone or tablet."
+        })
+        root.addView(TextView(this).apply { text = "Van DVR feed (through the laptop)"; textSize = 17f })
+        root.addView(TextView(this).apply {
+            textSize = 13f
+            text = "The van's DVR doesn't send its picture straight to this app — the laptop at home publishes it. " +
+                   "If that link at home is off, DVR tiles honestly say the feed is down; they light up on their own when it returns."
+        })
+        val dvrHostF = field(cfg.dvr.host, "Laptop address for the DVR feed")
+        val dvrPortF = field(cfg.dvr.port.toString(), "DVR feed port").apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+        root.addView(TextView(this).apply { text = "DVR feed address" }); root.addView(dvrHostF)
+        root.addView(TextView(this).apply { text = "DVR feed port" }); root.addView(dvrPortF)
+
         val saveBtn = Button(this).apply { text = "Save" }
         saveBtn.setOnClickListener {
+            cfg.bootToCameras = bootBox.isChecked
+            cfg.dvr.host = dvrHostF.text.toString().trim().ifEmpty { cfg.dvr.host }
+            cfg.dvr.port = dvrPortF.text.toString().toIntOrNull() ?: cfg.dvr.port
             cfg.steadyPicture = steadyBox.isChecked
             cfg.relay.enabled = awayBox.isChecked
             cfg.relay.host = hostF.text.toString().trim()
