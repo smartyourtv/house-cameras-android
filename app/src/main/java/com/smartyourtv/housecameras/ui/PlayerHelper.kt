@@ -42,6 +42,10 @@ class CameraPlayer(
     private val steady: Boolean = true,
     private val sourceLabelOverride: String? = null,
     private val downMessage: String? = null,
+    /** Relay-fed tiles (the DVR row) probe their feed before playing
+     *  and are NOT identity-managed — the resolver never touches them. */
+    private val feedProbe: Boolean = false,
+    private val identityManaged: Boolean = true,
     private val onHostHealed: (() -> Unit)? = null,
     private val onStatus: (String, Long) -> Unit
 ) {
@@ -137,12 +141,35 @@ class CameraPlayer(
         lastPosition = pos
     }
 
+    private var probePassed = false
+
     fun attachToPlayerView(view: PlayerView, fallbackImage: android.widget.ImageView? = null) {
         viewRef = view
         fallbackImageRef = fallbackImage
         attempts = 0
         status("Connecting…")
         handler.removeCallbacks(watchdog); handler.postDelayed(watchdog, 2000)
+        if (feedProbe) { probeThenPlay(); return }
+        guardThenPlay()
+    }
+
+    /** Relay-fed tiles: DESCRIBE the feed first. Down = the honest
+     *  down message lands NOW and stays (status ownership); the
+     *  retry policy keeps probing, and a probe success starts the
+     *  player — the row lights up by itself when the feed returns. */
+    private fun probeThenPlay() {
+        thread(name = "feed-probe-${cam.name}") {
+            val ok = try { com.smartyourtv.housecameras.core.Ingest.rtspDescribe(cam, source) }
+                     catch (_: Exception) { false }
+            handler.post {
+                if (stopped) return@post
+                if (ok) { probePassed = true; guardThenPlay() }
+                else scheduleRetry("feed down")
+            }
+        }
+    }
+
+    private fun guardThenPlay() {
         // CONTAINMENT (v1.0.4): before any player starts, pre-flight the
         // stream's H.265 SPS through the same parser Media3 will run.
         // A stream that breaks the parser never starts a player — it
@@ -218,7 +245,10 @@ class CameraPlayer(
                 noteFrame()
                 status("Live")
             }
-            override fun onPlayerError(error: PlaybackException) { scheduleRetry(error.errorCodeName) }
+            override fun onPlayerError(error: PlaybackException) {
+                if (feedProbe) probePassed = false
+                scheduleRetry(error.errorCodeName)
+            }
             override fun onPlaybackStateChanged(state: Int) {
                 // A stream that simply ends (session stop / 2 h cap)
                 // arrives here rather than as an error.
@@ -226,7 +256,11 @@ class CameraPlayer(
             }
         })
         p.prepare(); p.playWhenReady = true
-        status(if (attempts == 0) "Connecting…" else "Reconnecting…")
+        // STATUS OWNERSHIP (P4): only the first attempt announces
+        // itself. On retries the supervisor's standing message (the
+        // retry scheduler's, or the feed-down message) owns the tile —
+        // "Reconnecting…" no longer overwrites it between attempts.
+        if (attempts == 0) status("Connecting…")
         } catch (t: Throwable) {
             // Containment: a player that fails to even start becomes an
             // error tile via the retry path, never a crash.
@@ -258,9 +292,13 @@ class CameraPlayer(
             val wasSlow = policy.inSlowLane
             val delay = policy.nextDelayMs() +
                 com.smartyourtv.housecameras.core.Breaker.extraDelayMs(System.currentTimeMillis())
-            if (policy.inSlowLane) {
+            if (feedProbe) {
+                // The down message declares on the FIRST failure and
+                // stays — no burst-phase churn in front of it.
+                status(downMessage ?: "No signal")
+            } else if (policy.inSlowLane) {
                 status(downMessage ?: "No signal — still trying every minute (last problem: $reason)")
-                if (!wasSlow && !resolveTriedInSlowLane) {
+                if (!wasSlow && !resolveTriedInSlowLane && identityManaged) {
                     // Burst spent with no picture: maybe the camera
                     // MOVED. Ask the resolver once per slow-lane entry.
                     resolveTriedInSlowLane = true
@@ -275,10 +313,12 @@ class CameraPlayer(
                         } catch (_: Exception) {}
                     }
                 }
-            } else {
+            } else if (!feedProbe) {
                 status("No signal — trying again…")
             }
-            handler.postDelayed({ retryPending = false; if (!stopped) startPlayer() }, delay)
+            handler.postDelayed({ retryPending = false; if (!stopped) {
+                if (feedProbe && !probePassed) probeThenPlay() else startPlayer()
+            } }, delay)
         }
         updateBreakerMessage()
     }

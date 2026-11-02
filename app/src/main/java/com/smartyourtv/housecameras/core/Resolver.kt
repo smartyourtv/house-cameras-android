@@ -18,13 +18,15 @@ object Resolver {
     enum class FastPath { VERIFIED, STRANGER, DEAD, UNKNOWN }
 
     /** Banner evidence for a host: RTSP Server header + HTTP
-     *  Server/realm. Contains no credentials. */
+     *  Server/realm. Contains no credentials. Resolver-grade
+     *  timeouts (2.5 s): this is a background pass, and the road it
+     *  runs on swings to seconds of latency (rehearsal item 5). */
     fun fingerprint(host: String): String {
-        val rtsp = Discovery.rtspBanner(host)
+        val rtsp = Discovery.rtspBanner(host, timeoutMs = 2500)
         val serverLine = rtsp.lineSequence()
             .firstOrNull { it.lowercase().startsWith("server:") }
             ?.substringAfter(":")?.trim() ?: ""
-        val http = Discovery.httpBanner(host).trim()
+        val http = Discovery.httpBanner(host, timeoutMs = 2500).trim()
         return listOf(serverLine, http).filter { it.isNotEmpty() }.joinToString("|")
     }
 
@@ -36,15 +38,19 @@ object Resolver {
         return describeOk to fingerprint(host)
     }
 
-    /** What the cached address looks like right now. When the camera
-     *  has no fingerprint on file yet, "answers + DESCRIBEs" counts
-     *  as verified and the fingerprint gets learned by resolveOne. */
+    /** What the cached address looks like right now. PARTIAL
+     *  EVIDENCE RULE (rehearsal item 5): a stream that DESCRIBEs is
+     *  verified whenever the stored fingerprint is empty, the fresh
+     *  one came back empty/partial, or the two OVERLAP on any token.
+     *  STRANGER requires a full house: something answers, and its
+     *  complete fingerprint shares NOTHING with the stored one. */
     fun fastPath(cam: Camera): FastPath {
         if (cam.host.isEmpty()) return FastPath.DEAD
         val (describeOk, fp) = probe(cam, cam.host)
         val stored = cam.identity.fingerprint
         return when {
-            describeOk && (stored.isEmpty() || fp.isEmpty() || fp == stored) -> FastPath.VERIFIED
+            describeOk && (stored.isEmpty() || fp.isEmpty() ||
+                IdentityMatch.fingerprintOverlap(stored, fp)) -> FastPath.VERIFIED
             describeOk || fp.isNotEmpty() -> FastPath.STRANGER
             else -> FastPath.DEAD
         }
@@ -70,9 +76,10 @@ object Resolver {
         }
         val subnet = Discovery.localSubnetPrefix(ctx)
         val found = Discovery.merge(
-            try { Discovery.onvif(1500) } catch (_: Exception) { emptyList() },
+            try { Discovery.onvif(1500, ctx) } catch (_: Exception) { emptyList() },
             try { Discovery.hip2pVscp(1200) } catch (_: Exception) { emptyList() },
             try { Discovery.lanSweep(subnet) } catch (_: Exception) { emptyList() })
+        Reports.event(ctx, "SWEEP: ${cam.name} — ${found.size} hosts up on the network")
         val candidates = mutableListOf<Pair<String, IdentityMatch.Evidence>>()
         for (fh in found) {
             if (fh.host == cam.host) continue
@@ -86,6 +93,9 @@ object Resolver {
             candidates.add(fh.host to IdentityMatch.Evidence(
                 fingerprint = fingerprint(fh.host), family = cam.family))
         }
+        if (candidates.isNotEmpty())
+            Reports.event(ctx, "SWEEP: ${cam.name} — ${candidates.size} candidate(s): " +
+                candidates.joinToString(", ") { "${it.first} (score ${IdentityMatch.score(cam.identity, it.second, cam.family)})" })
         return when (val d = IdentityMatch.select(cam.identity, candidates, cam.family)) {
             is IdentityMatch.Decision.Adopt -> {
                 val old = cam.host

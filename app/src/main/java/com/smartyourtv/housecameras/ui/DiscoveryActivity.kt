@@ -44,7 +44,7 @@ class DiscoveryActivity : Activity() {
             try {
                 val prefix = Discovery.localSubnetPrefix(this)
                 val merged = Discovery.merge(
-                    Discovery.onvif(), Discovery.hip2pVscp(), Discovery.lanSweep(prefix))
+                    Discovery.onvif(ctx = this@DiscoveryActivity), Discovery.hip2pVscp(), Discovery.lanSweep(prefix))
                 found.clear(); found.addAll(merged)
                 runOnUiThread {
                     btn.isEnabled = true

@@ -41,6 +41,19 @@ class IdentityTest {
         assertEquals(1, IdentityMatch.score(id, IdentityMatch.Evidence(family = "hip2p"), "hip2p"))
         assertEquals(0, IdentityMatch.score(id, IdentityMatch.Evidence(family = "reolink"), "hip2p"))
     }
+    @Test fun fingerprintTokenOverlap() {
+        // Partial evidence from a slow road: one half answered.
+        assertTrue(IdentityMatch.fingerprintOverlap(id.fingerprint, "HipCam"))
+        assertTrue(IdentityMatch.fingerprintOverlap(id.fingerprint, "Basic realm=\"index.html\""))
+        assertTrue(IdentityMatch.fingerprintOverlap("HipCam|x", "HipCam|y"))
+        assertFalse(IdentityMatch.fingerprintOverlap(id.fingerprint, "OtherCam|Basic realm=\"admin\""))
+        // A partial fresh fingerprint that overlaps still scores 2 with family.
+        assertEquals(2, IdentityMatch.score(id, IdentityMatch.Evidence(
+            fingerprint = "HipCam", family = "hip2p"), "hip2p"))
+        // A complete but disjoint fingerprint does not.
+        assertEquals(1, IdentityMatch.score(id, IdentityMatch.Evidence(
+            fingerprint = "OtherCam|Basic realm=\"admin\"", family = "hip2p"), "hip2p"))
+    }
     @Test fun selectAdoptsUniqueTop() {
         val d = IdentityMatch.select(id, listOf(
             "192.168.40.50" to IdentityMatch.Evidence(family = "hip2p"),

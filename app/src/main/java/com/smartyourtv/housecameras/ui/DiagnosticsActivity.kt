@@ -47,6 +47,15 @@ class DiagnosticsActivity : Activity() {
             text = buildString {
                 appendLine("Road: ${LiveState.roadSummary()}")
                 if (LiveState.breakerMessage.isNotEmpty()) appendLine(LiveState.breakerMessage)
+                val cfgNames = cfg.cameras.map { it.name }.toSet()
+                for ((name, st) in LiveState.cams) {
+                    if (name in cfgNames) continue
+                    // Tiles that aren't saved cameras (the DVR row):
+                    val age = if (st.lastFrameAt == 0L) "no picture yet"
+                        else "${(System.currentTimeMillis() - st.lastFrameAt) / 1000}s ago"
+                    appendLine("• $name — ${st.stateWord} — by ${st.sourceLabel} — at ${st.host} " +
+                               "— last picture $age — road ${st.roadWord} — restarts this hour: ${st.restartsThisHour}")
+                }
                 for (c in cfg.cameras) {
                     if (!c.enabled) continue
                     val st = LiveState.cams[c.name]

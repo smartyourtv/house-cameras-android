@@ -16,10 +16,19 @@ data class FoundHost(
 
 object Discovery {
 
-    /** ONVIF WS-Discovery: SOAP Probe to 239.255.255.250:3702. */
-    fun onvif(timeoutMs: Int = 2500): List<FoundHost> {
+    /** ONVIF WS-Discovery: SOAP Probe to 239.255.255.250:3702.
+     *  Takes a MulticastLock when a context is provided — without
+     *  one, many Android builds silently drop multicast replies. */
+    fun onvif(timeoutMs: Int = 2500, ctx: android.content.Context? = null): List<FoundHost> {
         val results = mutableListOf<FoundHost>()
+        var lock: android.net.wifi.WifiManager.MulticastLock? = null
         try {
+            if (ctx != null) {
+                val wifi = ctx.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE)
+                    as android.net.wifi.WifiManager
+                lock = wifi.createMulticastLock("housecameras-onvif")
+                lock.setReferenceCounted(false); lock.acquire()
+            }
             val id = "urn:uuid:" + UUID.randomUUID()
             val probe = """<?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:dn="http://www.onvif.org/ver10/network/wsdl"><s:Header><a:MessageID>$id</a:MessageID><a:To>urn:schemas-xmlsoap-org:ws:2005:04:discovery</a:To><a:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</a:Action></s:Header><s:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></s:Body></s:Envelope>"""
@@ -44,6 +53,7 @@ object Discovery {
             }
             sock.close()
         } catch (_: Exception) { }
+        try { lock?.release() } catch (_: Exception) {}
         return results
     }
 
@@ -121,18 +131,18 @@ object Discovery {
         return results
     }
 
-    fun rtspBanner(host: String, port: Int = 554): String = try {
+    fun rtspBanner(host: String, port: Int = 554, timeoutMs: Int = 700): String = try {
         Socket().use { s ->
-            s.connect(InetSocketAddress(host, port), 600); s.soTimeout = 700
+            s.connect(InetSocketAddress(host, port), timeoutMs); s.soTimeout = timeoutMs
             s.getOutputStream().write("OPTIONS rtsp://$host:$port/ RTSP/1.0\r\nCSeq: 1\r\n\r\n".toByteArray())
             val buf = ByteArray(512); val n = s.getInputStream().read(buf)
             if (n > 0) String(buf, 0, n) else ""
         }
     } catch (_: Exception) { "" }
 
-    fun httpBanner(host: String): String = try {
+    fun httpBanner(host: String, timeoutMs: Int = 700): String = try {
         val conn = URL("http://$host/").openConnection() as HttpURLConnection
-        conn.connectTimeout = 700; conn.readTimeout = 700
+        conn.connectTimeout = timeoutMs; conn.readTimeout = timeoutMs
         conn.setRequestProperty("User-Agent", "HouseCameras-Discovery")
         val server = conn.getHeaderField("Server") ?: ""
         val realm = conn.getHeaderField("WWW-Authenticate") ?: ""

@@ -179,3 +179,26 @@ focusable cells, first tile requests focus on TV); boot receiver
 exported=true with the boot permission as Android requires;
 DVR pseudo-cameras never enter the saved config (built in memory
 per view) so identity/resolver logic is untouched by them.
+
+## v2.0.0 P4 — rehearsal fixes (2026-11-02)
+From the P3 rehearsal (Mechanic lane sheet + two corrections):
+(1) Fingerprint: exact-string match over two short-timeout banner
+fetches cascaded partial evidence into fleet-wide "not found" on a
+seconds-swing road. Fix: token-set fingerprints matched by OVERLAP,
+resolver banner timeouts 2.5 s, partial evidence can never declare
+STRANGER (verified = describe OK + (no stored fp | overlap | no
+fresh fp)), sweep candidate counts logged to events, ONVIF gets
+CHANGE_WIFI_MULTICAST_STATE + a MulticastLock. (2) Status
+ownership: startPlayer no longer overwrites the supervisor's
+standing message on retries. (3) DVR feed probe: relay-fed tiles
+DESCRIBE-probe before playing; the down message declares on first
+failure and stays; Diagnostics lists DVR tiles from LiveState.
+(4) Relay-fed tiles are flagged out of identity management (no
+resolver noise). (5) Banner also fires on a sustained (60 s)
+Road: Bad. (6) Focus position remembered across stage rebuilds.
+(7) Boot route (a) per HQ ruling: SYSTEM_ALERT_WINDOW declared +
+a Settings affordance showing/requesting the overlay grant (the
+background-activity-start exemption, Onn/Outpost precedent);
+HOME route NOT implemented (held by HQ — owner's personal call).
+Blast radius: this app only. Rollback: 1.0.7 published; the box's
+installed v2 P2 build stays whole until the re-rehearsal.

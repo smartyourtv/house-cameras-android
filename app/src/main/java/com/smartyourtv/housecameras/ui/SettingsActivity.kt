@@ -78,6 +78,36 @@ class SettingsActivity : Activity() {
             text = "For a TV box in the garage or living room: when it powers up, it goes straight to the cameras. " +
                    "This does nothing on a phone or tablet."
         })
+        val overlayState = TextView(this).apply { textSize = 13f }
+        fun refreshOverlay() {
+            val granted = android.provider.Settings.canDrawOverlays(this@SettingsActivity)
+            overlayState.text = if (granted)
+                "Opening over other apps: ALLOWED — the cameras can open by themselves when the box turns on."
+            else
+                "Opening over other apps: not allowed yet — without it, this box won't let the cameras open " +
+                "by themselves at boot (the box starts the app but keeps it off the screen)."
+        }
+        refreshOverlay()
+        root.addView(overlayState)
+        val overlayBtn = Button(this).apply { text = "Allow opening over other apps" }
+        overlayBtn.setOnClickListener {
+            try {
+                val i = android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:$packageName"))
+                startActivity(i)
+            } catch (_: Exception) {
+                Toast.makeText(this@SettingsActivity,
+                    "Couldn't open that settings page on this box.", Toast.LENGTH_LONG).show()
+            }
+        }
+        root.addView(overlayBtn)
+        root.addView(TextView(this).apply {
+            textSize = 12f
+            text = "After allowing it there, come back and reboot the box once to prove it. " +
+                   "(This can also be granted from a computer by the household's tech helper.)"
+        })
+
         root.addView(TextView(this).apply { text = "Van DVR feed (through the laptop)"; textSize = 17f })
         root.addView(TextView(this).apply {
             textSize = 13f

@@ -35,11 +35,20 @@ object IdentityMatch {
         if (evMac.isNotEmpty() && id.mac.isNotEmpty() &&
             macTail(evMac) == macTail(normMac(id.mac)) && familyMatches) best = 2
         if (ev.fingerprint.isNotEmpty() && id.fingerprint.isNotEmpty() &&
-            ev.fingerprint == id.fingerprint && familyMatches)
+            fingerprintOverlap(id.fingerprint, ev.fingerprint) && familyMatches)
             best = maxOf(best, 2)
         if (best == 0 && familyMatches) best = 1
         return best
     }
+
+    /** Fingerprints are token sets ("rtspServer|httpServer realm…").
+     *  On a road with seconds of latency swing, any single fetch may
+     *  return only part of the evidence — so ANY shared non-trivial
+     *  token counts as the same camera (rehearsal item 5 fix). */
+    fun fingerprintTokens(fp: String): Set<String> =
+        fp.split('|').map { it.trim() }.filter { it.length >= 3 }.toSet()
+    fun fingerprintOverlap(a: String, b: String): Boolean =
+        fingerprintTokens(a).intersect(fingerprintTokens(b)).isNotEmpty()
 
     sealed class Decision {
         data class Adopt(val host: String, val score: Int) : Decision()

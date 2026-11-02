@@ -30,6 +30,11 @@ class MainActivity : Activity() {
     private var view: StageSpec.View = StageSpec.HOUSE
     private var resolving = false
     private val uiHandler = Handler(Looper.getMainLooper())
+    /** Focus memory (P4, rehearsal item 4 watch): stage rebuilds
+     *  (resume, resolver return) restore the tile/bar position the
+     *  remote was on instead of dropping focus to the first tile. */
+    private var lastFocusKey: String = ""
+    private var roadBadSince: Long = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,12 +56,15 @@ class MainActivity : Activity() {
         for (v in StageSpec.VIEWS) {
             val b = Button(this).apply {
                 text = v.label
+                tag = "bar:${v.label}"
                 setOnClickListener { switchView(v) }
+                setOnFocusChangeListener { fv, has -> if (has) lastFocusKey = fv.tag as String }
             }
             bar.addView(b)
         }
         fun menuBtn(label: String, act: () -> Unit) = Button(this).apply {
-            text = label; setOnClickListener { act() }
+            text = label; tag = "bar:$label"; setOnClickListener { act() }
+            setOnFocusChangeListener { fv, has -> if (has) lastFocusKey = fv.tag as String }
         }
         bar.addView(menuBtn("Find cameras") { startActivity(Intent(this, DiscoveryActivity::class.java)) })
         bar.addView(menuBtn("Add") { openEdit(-1) })
@@ -90,7 +98,19 @@ class MainActivity : Activity() {
 
     private val bannerTick = object : Runnable {
         override fun run() {
-            val msg = LiveState.breakerMessage
+            // Banner fires on a breaker trip OR a sustained Bad road
+            // (60 s) — staggered stalls that never trip the breaker
+            // still owe the grid a plain road signal (rehearsal item 6).
+            val now = System.currentTimeMillis()
+            val roadBad = LiveState.roadSummary() == "Bad"
+            if (roadBad) { if (roadBadSince == 0L) roadBadSince = now }
+            else roadBadSince = 0
+            val sustainedBad = roadBad && now - roadBadSince >= 60_000
+            val msg = when {
+                LiveState.breakerMessage.isNotEmpty() -> LiveState.breakerMessage
+                sustainedBad -> "Road is bad right now — streams will return on their own."
+                else -> ""
+            }
             banner.text = msg
             banner.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
             uiHandler.postDelayed(this, 3000)
@@ -165,7 +185,11 @@ class MainActivity : Activity() {
                 if (firstTile == null && tile != null) firstTile = cell
             }
         }
-        if (isTelevision(this)) firstTile?.post { firstTile.requestFocus() }
+        // Restore remembered focus (a tile key from before the
+        // rebuild), else land on the first tile on TV.
+        val target = if (lastFocusKey.isNotEmpty())
+            window.decorView.findViewWithTag<View>(lastFocusKey) ?: firstTile else firstTile
+        if (isTelevision(this)) target?.post { target.requestFocus() }
     }
 
     private fun buildTile(tile: Tile?): View {
@@ -237,7 +261,8 @@ class MainActivity : Activity() {
                     steady = cfg.steadyPicture,
                     sourceLabelOverride = "Relay",
                     downMessage = "DVR feed is down — the van DVR's link at home is off right now. " +
-                                  "The app keeps checking and the picture will appear on its own when the feed returns."
+                                  "The app keeps checking and the picture will appear on its own when the feed returns.",
+                    feedProbe = true, identityManaged = false
                 ) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
                 else CameraPlayer(this, cam, source, cfg.relay,
                     steady = cfg.steadyPicture,
@@ -250,8 +275,10 @@ class MainActivity : Activity() {
         inner.addView(status, statusLp)
         wrap.isFocusable = true
         wrap.isClickable = true
+        wrap.tag = "tile:${cam.name}"
         wrap.setOnFocusChangeListener { v, has ->
             v.setBackgroundColor(if (has) Color.rgb(20, 83, 45) else Color.rgb(10, 10, 10))
+            if (has) lastFocusKey = v.tag as String
         }
         wrap.setOnClickListener {
             if (isDvr) openDvr(tile.dvrChannel) else openSingle(tile.cfgIndex)
