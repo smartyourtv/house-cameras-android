@@ -202,3 +202,11 @@ background-activity-start exemption, Onn/Outpost precedent);
 HOME route NOT implemented (held by HQ — owner's personal call).
 Blast radius: this app only. Rollback: 1.0.7 published; the box's
 installed v2 P2 build stays whole until the re-rehearsal.
+
+## P4 amendment — HOME declaration (2026-11-02, HQ instruction)
+MainActivity also declares CATEGORY_HOME + DEFAULT: the app can
+be picked as the box's home screen. Declaration alone changes
+nothing (the W2's default home stays CYX; a default exists, so no
+chooser prompt); the default-home FLIP is the owner's personal
+ruling, pending at HQ. The boot receiver stays regardless. Overlay
+route (a) re-test still stands as the first field check.

@@ -44,6 +44,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <!-- HOME declared per HQ (2026-11-02): the app CAN be
+                     the box's home screen, which removes the blocked
+                     background-activity start entirely. Declaring it
+                     changes nothing by itself — the box's default
+                     home stays CYX until the OWNER rules the flip. -->
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
         <activity android:name=".ui.SingleActivity" android:exported="false" />
