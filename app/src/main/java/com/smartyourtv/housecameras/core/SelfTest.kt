@@ -49,6 +49,24 @@ object SelfTest {
         val missing = Templates.ALL.filter { it.key != "generic" && it.value.main.path.isEmpty() }
         out.add(Result("Camera family templates (${Templates.ALL.size})", missing.isEmpty(),
             if (missing.isEmpty()) "All families have stream paths" else "Missing paths: ${missing.keys}"))
+        // Identity dry-run (v2): each turned-on camera's saved address
+        // must answer AND look like the same camera (banner fingerprint).
+        try {
+            val cfg2 = Store.load(ctx)
+            for (c in cfg2.cameras) {
+                if (!c.enabled || c.host.isEmpty()) continue
+                val fp = Resolver.fastPath(c)
+                out.add(Result("Identity — ${c.name}", fp == Resolver.FastPath.VERIFIED,
+                    when (fp) {
+                        Resolver.FastPath.VERIFIED -> "answers at ${c.host} and matches (${c.identity.anchorDescription()})"
+                        Resolver.FastPath.STRANGER -> "something answers at ${c.host} but it doesn't look like this camera — the app will search by identity"
+                        Resolver.FastPath.DEAD -> "nothing answers at ${c.host} — the app will search by identity"
+                        Resolver.FastPath.UNKNOWN -> "couldn't check"
+                    }))
+            }
+        } catch (e: Exception) {
+            out.add(Result("Identity check", false, "${e.message}"))
+        }
         // Reports folder writable
         try {
             val f = java.io.File(Reports.dir(ctx), ".probe"); f.writeText("ok"); f.delete()

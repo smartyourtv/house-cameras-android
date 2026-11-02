@@ -16,6 +16,30 @@ data class CameraSource(
     var via: String = ""          // onvif | template | generic | mjpeg | snapshot | relay
 )
 
+/** Who a camera IS, independent of where it currently sits (v2).
+ *  The host address is a cache; this block is the truth. Fields are
+ *  filled from whatever the protocols actually provide — for this
+ *  fleet the workhorse anchor is the banner fingerprint + family
+ *  (VSCP is best-effort, ONVIF thin); MAC/UUID/UID matching is live
+ *  for any device that offers them. No credentials live here. */
+data class Identity(
+    var mac: String = "",                       // normalized: lowercase hex, no separators
+    var macAliases: MutableList<String> = mutableListOf(),  // presented-MAC variants
+    var onvifUuid: String = "",
+    var onvifSerial: String = "",
+    var hip2pUid: String = "",
+    var fingerprint: String = "",               // RTSP Server + HTTP Server/realm evidence
+    var lastVerifiedAt: Long = 0
+) {
+    fun anchorDescription(): String = when {
+        mac.isNotEmpty() -> "MAC …${mac.takeLast(6)}"
+        onvifUuid.isNotEmpty() -> "ONVIF id"
+        hip2pUid.isNotEmpty() -> "camera UID"
+        fingerprint.isNotEmpty() -> "banner fingerprint"
+        else -> "not learned yet"
+    }
+}
+
 data class Camera(
     var name: String = "",
     var host: String = "",
@@ -24,7 +48,8 @@ data class Camera(
     var credentials: Credentials = Credentials(),
     var main: CameraSource = CameraSource(),
     var sub: CameraSource = CameraSource(),
-    var notes: String = ""
+    var notes: String = "",
+    var identity: Identity = Identity()
 ) {
     /** Build a playable URL in memory. Relay mode (confirmed interface,
      *  camera-relay-build-2026-10-24): the relay on the ThinkPad's
@@ -78,7 +103,11 @@ data class RelayConfig(
 data class AppConfig(
     var cameras: MutableList<Camera> = mutableListOf(),
     var relay: RelayConfig = RelayConfig(),
-    var lastNotifiedVersionCode: Int = 0
+    var lastNotifiedVersionCode: Int = 0,
+    /** Owner ruling 2026-11-02: "Steady picture" — ON = deep buffer
+     *  (grid ~10 s, single ~4 s) to ride out a shaky road; OFF =
+     *  lowest latency. Default ON. Read at stream start. */
+    var steadyPicture: Boolean = true
 )
 
 /** Redact anything that looks like a credential-bearing URL before it

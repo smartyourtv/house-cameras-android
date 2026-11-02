@@ -55,6 +55,25 @@ object Reports {
         } catch (_: Exception) { /* the in-app copy already landed */ }
     }
 
+    /** Engine event log (v2): heals, restarts, breaker trips — the
+     *  self-repair law's "every repair is logged" surface. Appended
+     *  in-app only (events.log, capped by rotation at ~200 KB); the
+     *  diagnostics card shows the tail. Never uploaded. */
+    @Synchronized fun event(ctx: Context, line: String) {
+        try {
+            val f = File(dir(ctx), "events.log")
+            if (f.length() > 200_000) {
+                val tail = f.readText().takeLast(100_000)
+                f.writeText(tail)
+            }
+            f.appendText("${human.format(Date())}  ${redact(line)}\n")
+        } catch (_: Exception) {}
+    }
+
+    fun events(ctx: Context, last: Int = 40): List<String> = try {
+        File(dir(ctx), "events.log").readLines().takeLast(last)
+    } catch (_: Exception) { emptyList() }
+
     fun list(ctx: Context): List<File> =
         dir(ctx).listFiles()?.filter { it.name.endsWith(".txt") }
             ?.sortedByDescending { it.name } ?: emptyList()

@@ -51,8 +51,25 @@ class SettingsActivity : Activity() {
         }
         root.addView(relayState)
 
+        root.addView(TextView(this).apply {
+            text = "Picture steadiness"; textSize = 17f
+        })
+        val steadyBox = CheckBox(this).apply {
+            text = "Steady picture (smoother video on a shaky connection)"
+            isChecked = cfg.steadyPicture
+        }
+        root.addView(steadyBox)
+        root.addView(TextView(this).apply {
+            textSize = 13f
+            text = "On: the app keeps a few extra seconds of video in reserve (about 10 seconds in the grid, " +
+                   "about 4 in the big view), so a rough patch on the connection doesn't make the picture flash or freeze. " +
+                   "The picture runs a few seconds behind real time. Off: the picture is as live as possible, " +
+                   "but a shaky connection will show as stutter. Changing this re-opens the camera streams — no restart needed."
+        })
+
         val saveBtn = Button(this).apply { text = "Save" }
         saveBtn.setOnClickListener {
+            cfg.steadyPicture = steadyBox.isChecked
             cfg.relay.enabled = awayBox.isChecked
             cfg.relay.host = hostF.text.toString().trim()
             cfg.relay.port = portF.text.toString().toIntOrNull() ?: 8554

@@ -40,6 +40,36 @@ class DiagnosticsActivity : Activity() {
             }
         })
 
+        // v2 live section: what every tile is doing RIGHT NOW, from
+        // frame freshness — plus the road word and the event log.
+        root.addView(TextView(this).apply {
+            textSize = 15f
+            text = buildString {
+                appendLine("Road: ${LiveState.roadSummary()}")
+                if (LiveState.breakerMessage.isNotEmpty()) appendLine(LiveState.breakerMessage)
+                for (c in cfg.cameras) {
+                    if (!c.enabled) continue
+                    val st = LiveState.cams[c.name]
+                    if (st == null) {
+                        appendLine("• ${c.name} — not started yet — at ${c.host.ifEmpty { "no address" }} " +
+                                   "(identity: ${c.identity.anchorDescription()})")
+                    } else {
+                        val age = if (st.lastFrameAt == 0L) "no picture yet"
+                            else "${(System.currentTimeMillis() - st.lastFrameAt) / 1000}s ago"
+                        appendLine("• ${c.name} — ${st.stateWord} — by ${st.sourceLabel} — at ${st.host} " +
+                                   "(identity: ${st.identityAnchor}) — last picture $age — road ${st.roadWord} — restarts this hour: ${st.restartsThisHour}")
+                    }
+                }
+            }
+        })
+        val events = Reports.events(this, 15)
+        if (events.isNotEmpty()) {
+            root.addView(TextView(this).apply { text = "Recent events (heals, stalls, repairs)"; textSize = 17f })
+            root.addView(TextView(this).apply {
+                textSize = 12f; text = events.joinToString("\n")
+            })
+        }
+
         output = TextView(this).apply { textSize = 14f }
         val testBtn = Button(this).apply { text = "Run the self-test" }
         testBtn.setOnClickListener {

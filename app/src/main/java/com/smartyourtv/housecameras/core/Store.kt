@@ -67,9 +67,18 @@ object Store {
                 .put("credentials", JSONObject()
                     .put("username", c.credentials.username)
                     .put("password", Crypto.protect(c.credentials.password)))
-                .put("main", sourceJson(c.main)).put("sub", sourceJson(c.sub)))
+                .put("main", sourceJson(c.main)).put("sub", sourceJson(c.sub))
+                .put("identity", JSONObject()
+                    .put("mac", c.identity.mac)
+                    .put("aliases", JSONArray(c.identity.macAliases))
+                    .put("uuid", c.identity.onvifUuid)
+                    .put("serial", c.identity.onvifSerial)
+                    .put("uid", c.identity.hip2pUid)
+                    .put("fp", c.identity.fingerprint)
+                    .put("verified", c.identity.lastVerifiedAt)))
         }
         return JSONObject().put("cameras", arr)
+            .put("steadyPicture", cfg.steadyPicture)
             .put("relay", JSONObject()
                 .put("enabled", cfg.relay.enabled).put("host", cfg.relay.host)
                 .put("port", cfg.relay.port).put("httpPort", cfg.relay.httpPort)
@@ -89,7 +98,8 @@ object Store {
                 notes = o.optString("notes"),
                 credentials = Credentials(cred.optString("username"),
                     Crypto.unprotect(cred.optString("password"))),
-                main = sourceParse(o.optJSONObject("main")), sub = sourceParse(o.optJSONObject("sub"))))
+                main = sourceParse(o.optJSONObject("main")), sub = sourceParse(o.optJSONObject("sub")),
+                identity = identityParse(o.optJSONObject("identity"))))
         }
         val r = root.optJSONObject("relay") ?: JSONObject()
         cfg.relay = RelayConfig(r.optBoolean("enabled", false),
@@ -97,7 +107,18 @@ object Store {
             r.optInt("port", 8554), r.optInt("httpPort", 8888),
             Crypto.unprotect(r.optString("sessionToken")))
         cfg.lastNotifiedVersionCode = root.optInt("lastNotifiedVersionCode", 0)
+        cfg.steadyPicture = root.optBoolean("steadyPicture", true)
         return cfg
+    }
+
+    private fun identityParse(o: JSONObject?): Identity {
+        if (o == null) return Identity()
+        val aliases = mutableListOf<String>()
+        val arr = o.optJSONArray("aliases")
+        if (arr != null) for (i in 0 until arr.length()) aliases.add(arr.optString(i))
+        return Identity(o.optString("mac"), aliases, o.optString("uuid"),
+            o.optString("serial"), o.optString("uid"), o.optString("fp"),
+            o.optLong("verified", 0))
     }
 
     private fun sourceJson(s: CameraSource) = JSONObject()

@@ -11,8 +11,8 @@ android {
         applicationId = "com.smartyourtv.housecameras"
         minSdk = 26
         targetSdk = 35
-        versionCode = 107
-        versionName = "1.0.7"
+        versionCode = 200
+        versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val kf = System.getenv("KEYSTORE_FILE_PATH"); val kp = System.getenv("KEYSTORE_PASSWORD")

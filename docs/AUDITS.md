@@ -110,3 +110,39 @@ remembers the winning path, and — when the endpoints demand a login
 and none is stored — the tile says so plainly with the remedy
 (press-and-hold → add the camera password) instead of a generic
 failure. Carries the 1.0.6 leanback fix unchanged.
+
+## v2.0.0 P1 — engine + identity + diagnostics (2026-11-02)
+CHANGE-IMPACT: PlayerHelper evolves in place into the supervisor
+(same class name/surface for activities; new: freshness watchdog,
+RestartPolicy caps, circuit breaker, LoadControl from the Steady
+setting, LiveState/RoadMeter reporting). Models gain Identity per
+camera + AppConfig.steadyPicture; Store JSON gains both with
+defaults (v1 configs migrate in place; downgrade to 1.0.7 keeps
+cameras, loses identity). Resolver runs at grid build (fast-path
+fingerprint verify per camera in parallel; sweep only on
+dead/stranger). New files: Identity, Resolver, RoadMeter,
+RestartPolicy, LiveState. Diagnostics gains live-state/road/events
+sections; SelfTest gains an identity dry-run; Settings gains the
+"Steady picture" toggle (owner amendment 2026-11-02; applies on
+stream re-open — MainActivity already rebuilds players on resume).
+Blast radius: this app only. Rollback: v1.0.7 stays published.
+PRE-BUILD AUDIT: (1) Permissions — no new permissions (same-network
+sockets only). (2) Null-safety — resolver/supervisor paths are
+exception-contained; a resolver failure leaves the cached address in
+place (never worse than v1). (3) Identity safety — a repoint needs a
+unique top match at score >= 2 (MAC/UUID/UID, or MAC-tail+family, or
+fingerprint+family) AND a successful stream DESCRIBE at the new
+address; the cached address must be dead or a stranger first; ties
+refuse. For THIS fleet the honest anchor set is fingerprint+family
+(the fleet's VSCP is best-effort and ONVIF is thin — recorded in the
+Windows lane's evidence); MAC/UUID/UID matching is implemented for
+protocols that provide them. (4) Restart storms — per-tile caps +
+global breaker (3+ tiles stalled in 30 s => shared 30 s backoff +
+banner). (5) Road honesty — RoadMeter thresholds unit-tested with a
+fake clock. (6) Credentials — resolver probes use the camera's own
+stored login for its own DESCRIBE only; banners/fingerprints stored
+contain no credentials. (7) Threading — resolver off the UI thread;
+LiveState is concurrent; supervisors stay on the main Handler as in
+v1. Tests: Identity/RoadMeter/RestartPolicy/Breaker unit suites +
+the carried 16. Phase gate: P1 APK to dist only — no release, no
+version.json move; 1.0.7 remains the fleet build until P3 proof.

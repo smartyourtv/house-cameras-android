@@ -26,7 +26,7 @@ class SingleActivity : Activity() {
         if (!cfg.relay.active() && (source.kind == "snapshot" || source.kind == "mjpeg")) {
             val img = ImageView(this)
             root.addView(img, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            player = CameraPlayer(this, cam, source, cfg.relay) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
+            player = CameraPlayer(this, cam, source, cfg.relay, singleView = true, steady = cfg.steadyPicture) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
             player!!.startSnapshotPolling(img)
         } else {
             val frame = android.widget.FrameLayout(this)
@@ -37,7 +37,7 @@ class SingleActivity : Activity() {
             frame.addView(fallbackImg, android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             root.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            player = CameraPlayer(this, cam, source, cfg.relay) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
+            player = CameraPlayer(this, cam, source, cfg.relay, singleView = true, steady = cfg.steadyPicture) { s, _ -> runOnUiThread { status.text = "${cam.name} — $s" } }
             player!!.attachToPlayerView(pv, fallbackImg)
         }
         val hint = TextView(this).apply {

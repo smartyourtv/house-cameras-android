@@ -26,6 +26,7 @@ class MainActivity : Activity() {
         title = "House Cameras"
         buildUi()
         checkForUpdateQuietly()
+        window.decorView.post(bannerTick)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -43,6 +44,11 @@ class MainActivity : Activity() {
         bar.addView(menuBtn("Settings") { startActivity(Intent(this, SettingsActivity::class.java)) })
         bar.addView(menuBtn("Status") { startActivity(Intent(this, DiagnosticsActivity::class.java)) })
         root.addView(bar)
+        val banner = TextView(this).apply {
+            setTextColor(Color.rgb(255, 200, 90)); textSize = 13f
+            setPadding(dp(8), dp(2), dp(8), dp(2)); visibility = View.GONE
+        }
+        banner.id = 992; root.addView(banner)
         val honest = TextView(this).apply {
             setTextColor(Color.LTGRAY); textSize = 12f; setPadding(dp(8), 0, dp(8), dp(4))
             text = "Some cameras can't be added: ones that only work through a company cloud app " +
@@ -64,11 +70,38 @@ class MainActivity : Activity() {
         else "At home — direct from your cameras"
     }
 
+    private var resolving = false
     override fun onResume() {
         super.onResume()
         cfg = Store.load(this)
         refreshModeLabel()
-        buildGrid()
+        players.forEach { it.release() }; players.clear()
+        grid.removeAllViews()
+        // v2: identity resolution runs BEFORE the grid is built, so a
+        // camera that moved in a power-cycle shuffle is found by who
+        // it is, not by the address it used to have. Fast paths are
+        // quick; a sweep runs only for dead/stranger addresses.
+        if (resolving) return
+        resolving = true
+        Resolver.resolveAsync(this, cfg) { changed ->
+            runOnUiThread {
+                resolving = false
+                if (changed) Store.save(this, cfg)
+                buildGrid()
+            }
+        }
+    }
+
+    private val bannerTick = object : Runnable {
+        override fun run() {
+            val b = findViewById<TextView>(992)
+            val msg = LiveState.breakerMessage
+            if (b != null) {
+                b.text = msg
+                b.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
+            }
+            window.decorView.postDelayed(this, 3000)
+        }
     }
 
     override fun onPause() {
@@ -100,7 +133,9 @@ class MainActivity : Activity() {
             } else if (!cfg.relay.active() && (source.kind == "snapshot" || source.kind == "mjpeg")) {
                 val img = ImageView(this)
                 cell.addView(img, LinearLayout.LayoutParams(cellW, cellH))
-                val cp = CameraPlayer(this, cam, source, cfg.relay) { s, _ ->
+                val cp = CameraPlayer(this, cam, source, cfg.relay,
+                    steady = cfg.steadyPicture,
+                    onHostHealed = { Store.save(this, cfg) }) { s, _ ->
                     runOnUiThread { status.text = "${cam.name} — $s" }
                 }
                 players.add(cp); cp.startSnapshotPolling(img)
@@ -118,7 +153,9 @@ class MainActivity : Activity() {
                 frame.addView(pv, android.widget.FrameLayout.LayoutParams(cellW, cellH))
                 frame.addView(fallbackImg, android.widget.FrameLayout.LayoutParams(cellW, cellH))
                 cell.addView(frame)
-                val cp = CameraPlayer(this, cam, source, cfg.relay) { s, _ ->
+                val cp = CameraPlayer(this, cam, source, cfg.relay,
+                    steady = cfg.steadyPicture,
+                    onHostHealed = { Store.save(this, cfg) }) { s, _ ->
                     runOnUiThread { status.text = "${cam.name} — $s" }
                 }
                 players.add(cp); cp.attachToPlayerView(pv, fallbackImg)
