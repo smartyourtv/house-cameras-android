@@ -21,7 +21,20 @@ object IdentityMatch {
         val serial: String = "", val fingerprint: String = "", val family: String = ""
     )
 
-    fun score(id: Identity, ev: Evidence, camFamily: String = ""): Int {
+    /** Tokens shared by two or more cameras' fingerprints are
+     *  VENDOR-GENERIC (siblings run the same firmware and present
+     *  identical Server/realm strings — field-proven 2026-11-02
+     *  when generic-token overlap healed two tiles onto a third
+     *  camera). Generic tokens are family evidence, never identity. */
+    fun genericTokens(fps: Collection<String>): Set<String> {
+        val counts = mutableMapOf<String, Int>()
+        for (fp in fps) for (tok in fingerprintTokens(fp))
+            counts[tok] = (counts[tok] ?: 0) + 1
+        return counts.filterValues { it >= 2 }.keys
+    }
+
+    fun score(id: Identity, ev: Evidence, camFamily: String = "",
+              generic: Set<String> = emptySet()): Int {
         val evMac = normMac(ev.mac)
         if (evMac.isNotEmpty()) {
             if (id.mac.isNotEmpty() && evMac == normMac(id.mac)) return 3
@@ -34,8 +47,11 @@ object IdentityMatch {
         var best = 0
         if (evMac.isNotEmpty() && id.mac.isNotEmpty() &&
             macTail(evMac) == macTail(normMac(id.mac)) && familyMatches) best = 2
-        if (ev.fingerprint.isNotEmpty() && id.fingerprint.isNotEmpty() &&
-            fingerprintOverlap(id.fingerprint, ev.fingerprint) && familyMatches)
+        // Fingerprint counts as identity ONLY on discriminating
+        // tokens (the candidate's tokens minus the generic set).
+        val evTokens = fingerprintTokens(ev.fingerprint) - generic
+        if (evTokens.isNotEmpty() &&
+            evTokens.intersect(fingerprintTokens(id.fingerprint)).isNotEmpty() && familyMatches)
             best = maxOf(best, 2)
         if (best == 0 && familyMatches) best = 1
         return best
@@ -56,8 +72,9 @@ object IdentityMatch {
         object None : Decision()
     }
 
-    fun select(id: Identity, candidates: List<Pair<String, Evidence>>, camFamily: String = ""): Decision {
-        val scored = candidates.map { (host, ev) -> host to score(id, ev, camFamily) }
+    fun select(id: Identity, candidates: List<Pair<String, Evidence>>, camFamily: String = "",
+               generic: Set<String> = emptySet()): Decision {
+        val scored = candidates.map { (host, ev) -> host to score(id, ev, camFamily, generic) }
             .filter { it.second >= 2 }
         if (scored.isEmpty()) return Decision.None
         val top = scored.maxOf { it.second }

@@ -11,7 +11,7 @@ android {
         applicationId = "com.smartyourtv.housecameras"
         minSdk = 26
         targetSdk = 35
-        versionCode = 200
+        versionCode = 201
         versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

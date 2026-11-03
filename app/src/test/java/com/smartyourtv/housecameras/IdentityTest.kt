@@ -54,6 +54,32 @@ class IdentityTest {
         assertEquals(1, IdentityMatch.score(id, IdentityMatch.Evidence(
             fingerprint = "OtherCam|Basic realm=\"admin\"", family = "hip2p"), "hip2p"))
     }
+    @Test fun siblingBannersCannotAdopt() {
+        // Fleet reality (2026-11-02): siblings share the generic
+        // token; each owns ONE discriminating token (its realm).
+        val a = Identity(fingerprint = "GenSrv|realm-A")
+        val generic = IdentityMatch.genericTokens(listOf("GenSrv|realm-A", "GenSrv|realm-B"))
+        assertEquals(setOf("GenSrv"), generic)
+        // Sibling B's host as evidence for camera A: must NOT score 2.
+        assertEquals(1, IdentityMatch.score(a, IdentityMatch.Evidence(
+            fingerprint = "GenSrv|realm-B", family = "hip2p"), "hip2p", generic))
+        // A's own host: overlaps on A's discriminating token → 2.
+        assertEquals(2, IdentityMatch.score(a, IdentityMatch.Evidence(
+            fingerprint = "GenSrv|realm-A", family = "hip2p"), "hip2p", generic))
+        // select refuses adoption on sibling evidence.
+        val d = IdentityMatch.select(a, listOf("192.168.40.87" to IdentityMatch.Evidence(
+            fingerprint = "GenSrv|realm-B", family = "hip2p")), "hip2p", generic)
+        assertTrue(d is IdentityMatch.Decision.None)
+        // Pure-generic fleet (byte-identical banners): fingerprint
+        // can never reach identity grade at all.
+        val g2 = IdentityMatch.genericTokens(listOf("GenSrv", "GenSrv"))
+        assertEquals(1, IdentityMatch.score(Identity(fingerprint = "GenSrv"),
+            IdentityMatch.Evidence(fingerprint = "GenSrv", family = "hip2p"), "hip2p", g2))
+        // Without the generic set (single-camera world) the old
+        // behavior shows through — the set is what makes it safe.
+        assertEquals(2, IdentityMatch.score(a, IdentityMatch.Evidence(
+            fingerprint = "GenSrv|realm-B", family = "hip2p"), "hip2p"))
+    }
     @Test fun selectAdoptsUniqueTop() {
         val d = IdentityMatch.select(id, listOf(
             "192.168.40.50" to IdentityMatch.Evidence(family = "hip2p"),

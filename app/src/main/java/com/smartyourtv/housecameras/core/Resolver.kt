@@ -15,6 +15,11 @@ import kotlin.concurrent.thread
  *  logged (Reports.event) and shown in diagnostics via LiveState.
  *  A resolver failure changes nothing — never worse than v1. */
 object Resolver {
+
+    /** Fleet-generic banner tokens, recomputed on every resolveAll
+     *  pass and reused by single-camera resolves (the supervisor's
+     *  slow-lane path). Generic tokens can never prove identity. */
+    @Volatile var genericCache: Set<String> = emptySet()
     enum class FastPath { VERIFIED, STRANGER, DEAD, UNKNOWN }
 
     /** Banner evidence for a host: RTSP Server header + HTTP
@@ -48,9 +53,17 @@ object Resolver {
         if (cam.host.isEmpty()) return FastPath.DEAD
         val (describeOk, fp) = probe(cam, cam.host)
         val stored = cam.identity.fingerprint
+        // STRANGER requires DISCRIMINATING disagreement: both sides
+        // hold device-specific tokens and they share none. No
+        // discriminating tokens on a side = no judgment from the
+        // fingerprint at all (a sibling at this address is then
+        // indistinguishable — the documented fleet limit).
+        val storedDisc = IdentityMatch.fingerprintTokens(stored) - genericCache
+        val freshDisc = IdentityMatch.fingerprintTokens(fp) - genericCache
         return when {
             describeOk && (stored.isEmpty() || fp.isEmpty() ||
-                IdentityMatch.fingerprintOverlap(stored, fp)) -> FastPath.VERIFIED
+                storedDisc.isEmpty() || freshDisc.isEmpty() ||
+                storedDisc.intersect(freshDisc).isNotEmpty()) -> FastPath.VERIFIED
             describeOk || fp.isNotEmpty() -> FastPath.STRANGER
             else -> FastPath.DEAD
         }
@@ -95,8 +108,8 @@ object Resolver {
         }
         if (candidates.isNotEmpty())
             Reports.event(ctx, "SWEEP: ${cam.name} — ${candidates.size} candidate(s): " +
-                candidates.joinToString(", ") { "${it.first} (score ${IdentityMatch.score(cam.identity, it.second, cam.family)})" })
-        return when (val d = IdentityMatch.select(cam.identity, candidates, cam.family)) {
+                candidates.joinToString(", ") { "${it.first} (score ${IdentityMatch.score(cam.identity, it.second, cam.family, genericCache)})" })
+        return when (val d = IdentityMatch.select(cam.identity, candidates, cam.family, genericCache)) {
             is IdentityMatch.Decision.Adopt -> {
                 val old = cam.host
                 cam.host = d.host

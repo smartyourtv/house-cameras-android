@@ -210,3 +210,20 @@ nothing (the W2's default home stays CYX; a default exists, so no
 chooser prompt); the default-home FLIP is the owner's personal
 ruling, pending at HQ. The boot receiver stays regardless. Overlay
 route (a) re-test still stands as the first field check.
+
+## v2.0.0 P4.1 — sibling-collision hotfix (2026-11-02, versionCode 201)
+Field finding (re-rehearsal R3, Mechanic frame-checks): P4's token
+overlap healed house-2 and house-6 onto house-1's camera during a
+real DHCP shuffle — sibling cameras present IDENTICAL banner tokens
+(same firmware), so generic-token overlap is family evidence, not
+identity. Fix: tokens appearing in ≥2 cameras' stored fingerprints
+are computed as the fleet-generic set on every resolveAll; candidate
+scoring strips generic tokens (identity grade requires a
+DISCRIMINATING token shared with the stored fingerprint); fastPath
+STRANGER likewise requires discriminating disagreement; where no
+discriminating evidence exists the resolver keeps the address and
+logs "could not be PROVEN... banners are identical" — an honest
+degrade instead of a wrong heal. Sibling-collision tests added
+(including the pure-generic fleet, where fingerprint evidence can
+never adopt). Documented fleet limit: fully identical banners make
+address-swaps between siblings undetectable from banners alone.
