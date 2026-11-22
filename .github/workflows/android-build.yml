@@ -25,6 +25,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default set includes the legacy 'tools'
+          # package, which current SDK repositories no longer
+          # carry (first CI run, Nov 22: "Failed to find package
+          # 'tools'"). Name exactly what compileSdk 35 needs.
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Manifest hygiene gate (Pack H)
         run: python3 tools/check-manifest.py
