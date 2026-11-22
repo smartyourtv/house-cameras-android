@@ -84,13 +84,21 @@ data class Camera(
     var siteId: String = "home",   // D7/S9: the site this record belongs to
     var setupClass: String = ""    // S8: wired | battery | poe | via-recorder
 ) {
-    /** Build a playable URL in memory. Relay mode (confirmed interface,
-     *  camera-relay-build-2026-10-24): the relay on the ThinkPad's
-     *  Tailscale address serves each camera's MAIN stream at
-     *  /<slot-name> on RTSP :8554, authenticated as user "scout" with
-     *  the per-session token as the password, embedded in the URI
-     *  (verified against the relay). The camera's own address and
-     *  password never appear in a relay URL. */
+    /** Build a playable URL in memory. Relay mode (interface of
+     *  record, camera-relay-build-2026-10-24): the relay on the
+     *  ThinkPad's Tailscale address serves each camera's MAIN
+     *  stream at /<slot-name> on RTSP :8554, authenticated as user
+     *  "scout" with the per-session token as the password,
+     *  embedded in the URI. The camera's own address and password
+     *  never appear in a relay URL.
+     *  STATE, proof stage 2026-11-22: that interface was verified
+     *  against the relay on 2026-10-24, but the running :8554
+     *  instance today is the DVR-row relay (paths /dvr-1…/dvr-4
+     *  only) and REFUSES the house paths — DESCRIBE /house-1 and
+     *  /house-5 answer 400. Away mode cannot stand up until a
+     *  house-paths relay is restored on the ThinkPad side; the
+     *  interface above remains the contract it must serve. LAN
+     *  (direct) viewing is unaffected. */
     fun streamUrl(source: CameraSource, relay: RelayConfig): String {
         if (relay.active()) {
             val p = "/" + name.lowercase().replace(" ", "-")
@@ -137,7 +145,9 @@ data class RelayConfig(
     // in Settings for the house it serves. Existing installs keep
     // the address they already stored.
     var host: String = "",
-    var port: Int = 8554,                  // relay RTSP (confirmed)
+    var port: Int = 8554,                  // relay RTSP — the Oct 24 interface port;
+                                           // Nov 22 proof: today's :8554 instance
+                                           // serves no house paths (see streamUrl)
     var httpPort: Int = 8888,              // relay HLS (confirmed)
     var sessionToken: String = ""          // per-session token = password for user "scout";
                                            // fresh at every session start, entered by the user,
@@ -155,7 +165,9 @@ data class DvrConfig(
     // Portability (owner, Nov 22): no house's address as a default;
     // the DVR relay address is config, entered for the house served.
     var host: String = "",
-    var port: Int = 8554,                  // mediamtx RTSP default; confirm with the Laptop lane when the leg is revived
+    var port: Int = 8554,                  // the ThinkPad DVR relay — live at :8554 with
+                                           // paths /dvr-1…/dvr-4 (socket + DESCRIBE
+                                           // confirmed, proof stage Nov 22)
     var channels: Int = 4
 ) {
     fun path(channel: Int) = "/dvr-${channel + 1}"
