@@ -11,11 +11,11 @@ class PolicyTest {
         var now = 0L
         val p = RestartPolicy { now }
         val seq = (1..8).map { p.nextDelayMs() }
-        assertEquals(listOf(2000L, 4000L, 8000L, 16000L, 30000L, 30000L, 60000L, 60000L), seq)
+        assertEquals(listOf(1000L, 5000L, 10000L, 60000L, 60000L, 60000L, 60000L, 60000L), seq)
         assertTrue(p.inSlowLane)
         p.onFrame()
         assertFalse(p.inSlowLane)
-        assertEquals(2000L, p.nextDelayMs())
+        assertEquals(1000L, p.nextDelayMs())
     }
 
     @Test fun restartsThisHourCountsAndExpires() {

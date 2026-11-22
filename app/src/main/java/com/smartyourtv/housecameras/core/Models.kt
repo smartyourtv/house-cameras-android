@@ -40,6 +40,23 @@ data class Identity(
     }
 }
 
+/** What a camera PROVED it can do, learned by asking it — never
+ *  assumed from its family (future-proofing amendment, 2026-11-22,
+ *  rule 1). "advertised" = the service lists itself; "proven" = a
+ *  read-only call against it answered. Today's fleet advertises
+ *  PTZ it does not have fitted; features gate on "proven". */
+data class Capabilities(
+    var services: String = "",    // comma-joined ONVIF service names, as listed
+    var ptz: String = "",         // proven | advertised | absent
+    var events: String = "",      // advertised | absent
+    var mainCodec: String = "",   // e.g. "H264 1920x1080", from its own profiles
+    var learnedAt: Long = 0,
+    // Pile-2 seats (field-study additions, 2026-11-22):
+    var ptzPresets: String = "",  // D2: comma-joined preset names, filled only when PTZ is proven
+    var talk: String = "",        // D8: advertised | absent — its profiles carry an audio channel
+    var nativeEvents: Boolean = false  // D1: proven only by a working pull-point; false on today's fleet, honestly
+)
+
 data class Camera(
     var name: String = "",
     var host: String = "",
@@ -49,7 +66,23 @@ data class Camera(
     var main: CameraSource = CameraSource(),
     var sub: CameraSource = CameraSource(),
     var notes: String = "",
-    var identity: Identity = Identity()
+    var identity: Identity = Identity(),
+    var capabilities: Capabilities = Capabilities(),
+    /** Behavior as data (amendment rule 2): the keep-alive method
+     *  learned for this camera ("" = not learned; rtcp |
+     *  set_parameter | none) and where its events come from
+     *  ("" | frame | native | external). A new family is a new
+     *  record filled by discovery, not a code branch. */
+    var keepalive: String = "",
+    var eventSource: String = "",
+    // Pile-2 reserved seats (field-study additions, 2026-11-22) —
+    // each ships EMPTY and honest; no UI pretends otherwise:
+    var claimToken: String = "",   // S7: a factory-printed claim code, when the camera carries one
+    var zones: String = "",        // D5: analysis zones as JSON polygon text ("" = none)
+    var viewers: String = "household",  // D4: who may view (comma-joined identities)
+    var recorder: String = "",     // D3: assigned recorder ("" = the house primary rule)
+    var siteId: String = "home",   // D7/S9: the site this record belongs to
+    var setupClass: String = ""    // S8: wired | battery | poe | via-recorder
 ) {
     /** Build a playable URL in memory. Relay mode (confirmed interface,
      *  camera-relay-build-2026-10-24): the relay on the ThinkPad's
@@ -65,11 +98,21 @@ data class Camera(
                 "scout:${urlEncode(relay.sessionToken)}@" else ""
             return "rtsp://$userInfo${relay.host}:${relay.port}$p"
         }
-        val userInfo = if (credentials.hasLogin())
+        // Pack D: some families take the login inside the path.
+        // Templates carry {user}/{password} placeholders — never a
+        // baked credential — substituted here at connect time; a
+        // path with its own login gets no userinfo form.
+        val pathLogin = source.path.contains("{user}") ||
+            source.path.contains("{password}")
+        val path = if (pathLogin) source.path
+            .replace("{user}", urlEncode(credentials.username))
+            .replace("{password}", urlEncode(credentials.password))
+            else source.path
+        val userInfo = if (credentials.hasLogin() && !pathLogin)
             "${urlEncode(credentials.username)}:${urlEncode(credentials.password)}@" else ""
         val scheme = source.scheme.ifEmpty { "rtsp" }
         val port = if (source.port > 0) source.port else if (scheme == "http") 80 else 554
-        return "$scheme://$userInfo$host:$port${source.path}"
+        return "$scheme://$userInfo$host:$port$path"
     }
     /** HLS fallback URL on the relay (:8888, /<slot>/index.m3u8).
      *  HLS on this relay needs HTTP Basic (scout + token) AND cookie
@@ -89,7 +132,11 @@ data class Camera(
 
 data class RelayConfig(
     var enabled: Boolean = false,          // Away mode on/off
-    var host: String = "100.78.8.93",      // ThinkPad Tailscale address (relay binds ONLY there)
+    // Portability (owner, Nov 22): NO house's relay address is a
+    // default. A fresh install starts empty; the address is entered
+    // in Settings for the house it serves. Existing installs keep
+    // the address they already stored.
+    var host: String = "",
     var port: Int = 8554,                  // relay RTSP (confirmed)
     var httpPort: Int = 8888,              // relay HLS (confirmed)
     var sessionToken: String = ""          // per-session token = password for user "scout";
@@ -105,7 +152,9 @@ data class RelayConfig(
  *  There is deliberately NO CMSV7 anything here — no session, no
  *  account credentials on-device (owner ruling 2026-11-02). */
 data class DvrConfig(
-    var host: String = "192.168.40.189",   // laptop LAN address (same relay that serves house-4's transcode)
+    // Portability (owner, Nov 22): no house's address as a default;
+    // the DVR relay address is config, entered for the house served.
+    var host: String = "",
     var port: Int = 8554,                  // mediamtx RTSP default; confirm with the Laptop lane when the leg is revived
     var channels: Int = 4
 ) {
@@ -116,6 +165,10 @@ data class AppConfig(
     var cameras: MutableList<Camera> = mutableListOf(),
     var relay: RelayConfig = RelayConfig(),
     var lastNotifiedVersionCode: Int = 0,
+    /** Pack K L9: the update notice is persistent, not a one-shot
+     *  Toast — this records the version code the owner dismissed,
+     *  so the indicator stays away for THAT version only. */
+    var updateNoticeDismissed: Int = 0,
     /** Owner ruling 2026-11-02: "Steady picture" — ON = deep buffer
      *  (grid ~10 s, single ~4 s) to ride out a shaky road; OFF =
      *  lowest latency. Default ON. Read at stream start. */

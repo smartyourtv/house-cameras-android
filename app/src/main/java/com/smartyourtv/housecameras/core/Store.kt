@@ -14,48 +14,92 @@ object Store {
 
     private fun file(ctx: Context) = File(ctx.filesDir, "config.json")
 
-    fun seed(): AppConfig {
-        val cams = mutableListOf<Camera>()
-        val fleet = listOf(
-            Triple("house-1", "192.168.40.25", "side yard / gate"),
-            Triple("house-2", "192.168.40.82", "shed"),
-            Triple("house-3", "192.168.40.131", "back patio"),
-            Triple("house-4", "192.168.40.218", "garage / street (HEVC main)"),
-            Triple("house-5", "192.168.40.233", "above garage / over the van"),
-            Triple("house-6", "192.168.40.240", "flowering bushes")
-        )
-        for ((name, ip, note) in fleet) {
-            val tpl = Templates.forFamily("hip2p")
-            cams.add(Camera(name = name, host = ip, family = "hip2p",
-                main = tpl.main.copy(), sub = tpl.sub.copy(), notes = note))
+    /** The starter list. PORTABILITY RULE (owner, 2026-11-22):
+     *  no house's camera addresses or layout live in the app — a
+     *  fresh install starts EMPTY and discovery is how cameras are
+     *  added. A machine may carry an optional fleet-seed.json in
+     *  its app storage, placed there at install time by whoever
+     *  sets the machine up; when no config exists yet (or a repair
+     *  restores), that seed becomes the starting list. Seeds are
+     *  password-free by rule, enforced here (Pack D F18). */
+    fun seed(ctx: Context): AppConfig {
+        val sf = File(ctx.filesDir, "fleet-seed.json")
+        if (sf.exists()) {
+            try {
+                val raw = JSONObject(sf.readText())
+                val arr = raw.optJSONArray("cameras") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    val pw = arr.optJSONObject(i)?.optJSONObject("credentials")
+                        ?.optString("password", "") ?: ""
+                    if (pw.isNotEmpty()) {
+                        repairLog.add("The fleet seed carries a camera password — refused. Seeds are password-free by rule; the login is entered on the device.")
+                        return AppConfig()
+                    }
+                }
+                return parse(raw)
+            } catch (e: Exception) {
+                repairLog.add("The fleet seed could not be read (${e.javaClass.simpleName}) — starting with no cameras.")
+                return AppConfig()
+            }
         }
-        val tpl7 = Templates.forFamily("reolink")
-        cams.add(Camera(name = "house-7", host = "192.168.40.150", family = "reolink", enabled = false,
-            main = tpl7.main.copy(), sub = tpl7.sub.copy(),
-            notes = "Front door — Reolink (registers as 'Front'; at .150 in the 2026-10-24 census — address may move until DHCP reservations land). Disabled until its password is entered here."))
-        return AppConfig(cameras = cams)
+        return AppConfig()
     }
 
     fun load(ctx: Context): AppConfig {
         val f = file(ctx)
-        if (!f.exists()) { val s = seed(); save(ctx, s); return s }
+        if (!f.exists()) { val s = seed(ctx); save(ctx, s); return s }
         return try {
             parse(JSONObject(f.readText()))
         } catch (e: Exception) {
-            repairLog.add("Config was corrupt (${e.javaClass.simpleName}); backed up and restored seed defaults.")
+            repairLog.add("Config was corrupt (${e.javaClass.simpleName}); backed up and restored the starter list.")
             try { f.copyTo(File(ctx.filesDir, "config.json.bad"), overwrite = true) } catch (_: Exception) {}
-            val s = seed(); save(ctx, s)
+            val s = seed(ctx); save(ctx, s)
             val verify = try { parse(JSONObject(file(ctx).readText())); true } catch (_: Exception) { false }
             repairLog.add(if (verify) "Self-repair verified: restored config re-read OK."
                           else "Self-repair FAILED verification.")
+            persistRepairLog(ctx)
             s
         }
+    }
+
+    /** Pack E M4: repairs are written to the persistent event log
+     *  at the time they happen — a repair from a previous process
+     *  must still be visible on the Status screen after a restart,
+     *  not live only in this process's memory. */
+    private fun persistRepairLog(ctx: Context) {
+        try {
+            val dir = File(ctx.filesDir, "events").apply { mkdirs() }
+            val f = File(dir, "repairs.log")
+            for (line in repairLog) {
+                if (!f.exists() || !f.readText().contains(line)) {
+                    f.appendText("$line\n")
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** Repair lines across process restarts (Pack E M4), for the
+     *  Status screen: this process's lines plus the persisted ones. */
+    fun repairHistory(ctx: Context): List<String> {
+        val out = mutableListOf<String>()
+        try {
+            val f = File(ctx.filesDir, "events/repairs.log")
+            if (f.exists()) out.addAll(f.readLines().filter { it.isNotBlank() })
+        } catch (_: Exception) {}
+        for (line in repairLog) if (line !in out) out.add(line)
+        return out
     }
 
     fun save(ctx: Context, cfg: AppConfig) {
         val tmp = File(ctx.filesDir, "config.json.tmp")
         tmp.writeText(toJson(cfg).toString())
-        tmp.renameTo(file(ctx))
+        // Pack E L7: a failed rename used to leave a stale config
+        // with no error anywhere. Check it, and say so.
+        if (!tmp.renameTo(file(ctx))) {
+            repairLog.add("Config save FAILED — the new settings could not replace the old file.")
+            persistRepairLog(ctx)
+            try { tmp.copyTo(file(ctx), overwrite = true) } catch (_: Exception) {}
+        }
     }
 
     fun toJson(cfg: AppConfig): JSONObject {
@@ -75,7 +119,24 @@ object Store {
                     .put("serial", c.identity.onvifSerial)
                     .put("uid", c.identity.hip2pUid)
                     .put("fp", c.identity.fingerprint)
-                    .put("verified", c.identity.lastVerifiedAt)))
+                    .put("verified", c.identity.lastVerifiedAt))
+                .put("capabilities", JSONObject()
+                    .put("services", c.capabilities.services)
+                    .put("ptz", c.capabilities.ptz)
+                    .put("events", c.capabilities.events)
+                    .put("mainCodec", c.capabilities.mainCodec)
+                    .put("learnedAt", c.capabilities.learnedAt)
+                    .put("ptzPresets", c.capabilities.ptzPresets)
+                    .put("talk", c.capabilities.talk)
+                    .put("nativeEvents", c.capabilities.nativeEvents))
+                .put("keepalive", c.keepalive)
+                .put("eventSource", c.eventSource)
+                .put("claimToken", c.claimToken)
+                .put("zones", c.zones)
+                .put("viewers", c.viewers)
+                .put("recorder", c.recorder)
+                .put("siteId", c.siteId)
+                .put("setupClass", c.setupClass))
         }
         return JSONObject().put("cameras", arr)
             .put("steadyPicture", cfg.steadyPicture)
@@ -88,6 +149,7 @@ object Store {
                 .put("port", cfg.relay.port).put("httpPort", cfg.relay.httpPort)
                 .put("sessionToken", Crypto.protect(cfg.relay.sessionToken)))
             .put("lastNotifiedVersionCode", cfg.lastNotifiedVersionCode)
+            .put("updateNoticeDismissed", cfg.updateNoticeDismissed)
     }
 
     fun parse(root: JSONObject): AppConfig {
@@ -103,22 +165,40 @@ object Store {
                 credentials = Credentials(cred.optString("username"),
                     Crypto.unprotect(cred.optString("password"))),
                 main = sourceParse(o.optJSONObject("main")), sub = sourceParse(o.optJSONObject("sub")),
-                identity = identityParse(o.optJSONObject("identity"))))
+                identity = identityParse(o.optJSONObject("identity")),
+                capabilities = capabilitiesParse(o.optJSONObject("capabilities")),
+                keepalive = o.optString("keepalive"),
+                eventSource = o.optString("eventSource"),
+                claimToken = o.optString("claimToken"),
+                zones = o.optString("zones"),
+                viewers = o.optString("viewers", "household").ifEmpty { "household" },
+                recorder = o.optString("recorder"),
+                siteId = o.optString("siteId", "home").ifEmpty { "home" },
+                setupClass = o.optString("setupClass"))))
         }
         val r = root.optJSONObject("relay") ?: JSONObject()
         cfg.relay = RelayConfig(r.optBoolean("enabled", false),
-            r.optString("host").ifEmpty { "100.78.8.93" },
+            r.optString("host"),
             r.optInt("port", 8554), r.optInt("httpPort", 8888),
             Crypto.unprotect(r.optString("sessionToken")))
         cfg.lastNotifiedVersionCode = root.optInt("lastNotifiedVersionCode", 0)
+        cfg.updateNoticeDismissed = root.optInt("updateNoticeDismissed", 0)
         cfg.steadyPicture = root.optBoolean("steadyPicture", true)
         cfg.homeView = root.optString("homeView", "HOUSE")
         cfg.bootToCameras = root.optBoolean("bootToCameras", true)
         val dv = root.optJSONObject("dvr")
         if (dv != null) cfg.dvr = DvrConfig(
-            dv.optString("host").ifEmpty { "192.168.40.189" },
+            dv.optString("host"),
             dv.optInt("port", 8554), dv.optInt("channels", 4))
         return cfg
+    }
+
+    private fun capabilitiesParse(o: JSONObject?): Capabilities {
+        if (o == null) return Capabilities()
+        return Capabilities(o.optString("services"), o.optString("ptz"),
+            o.optString("events"), o.optString("mainCodec"),
+            o.optLong("learnedAt", 0), o.optString("ptzPresets"),
+            o.optString("talk"), o.optBoolean("nativeEvents", false))
     }
 
     private fun identityParse(o: JSONObject?): Identity {

@@ -30,7 +30,10 @@ class RestartPolicy(private val clock: () -> Long = { System.currentTimeMillis()
     }
 
     companion object {
-        val BURST_DELAYS = longArrayOf(2_000, 4_000, 8_000, 16_000, 30_000, 30_000)
+        // The field ladder (Leg 2, item 9): 1s → 5s → 10s, then the
+        // 60s slow lane — a struggling camera is courted, not
+        // hammered, and a delivered frame resets the ladder.
+        val BURST_DELAYS = longArrayOf(1_000, 5_000, 10_000)
         const val SLOW_LANE_MS = 60_000L
     }
 }

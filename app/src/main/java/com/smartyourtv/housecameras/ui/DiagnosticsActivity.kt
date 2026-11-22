@@ -17,6 +17,25 @@ class DiagnosticsActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var output: TextView
 
+    /** Pack G M6: the RoadMeter numbers the engine already
+     *  collects — stalls, stall time, reconnects, connect time —
+     *  shown, not just gathered. */
+    private fun roadStats(name: String): String {
+        val m = LiveState.meters[name] ?: return ""
+        val connect = if (m.lastConnectMs >= 0) " — connect ${m.lastConnectMs}ms" else ""
+        return " — stalls ${m.stallCount()} (${m.stallTotalMs() / 1000}s) — reconnects ${m.reconnectCount()}$connect"
+    }
+
+    /** Future-proofing amendment: what the camera itself reported
+     *  it can do — asked, not assumed; advertised ≠ proven. */
+    private fun capsText(c: Camera): String {
+        val caps = c.capabilities
+        if (caps.learnedAt == 0L) return " — can do: not asked yet"
+        val codec = if (caps.mainCodec.isNotEmpty()) " — main picture ${caps.mainCodec}" else ""
+        val ka = if (c.keepalive.isNotEmpty()) " — keep-alive ${c.keepalive}" else ""
+        return " — can do: ptz ${caps.ptz.ifEmpty { "absent" }} · events ${caps.events.ifEmpty { "absent" }}$codec$ka"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         title = "Status & help"
@@ -31,12 +50,23 @@ class DiagnosticsActivity : Activity() {
                 appendLine("House Cameras ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 appendLine("Mode: ${if (cfg.relay.active()) "Away — through relay ${cfg.relay.host}" else "At home — direct"}")
                 appendLine("Cameras: ${cfg.cameras.count { it.enabled }} turned on of ${cfg.cameras.size}")
+                // Pack G M9: the box section carries the view/buffer
+                // settings and the updater state, not only cameras.
+                appendLine("Steady picture (deep buffer for a shaky road): ${if (cfg.steadyPicture) "on" else "off"}")
+                appendLine("Home view: ${cfg.homeView}")
+                appendLine("App updates: this is ${BuildConfig.VERSION_NAME}; " +
+                    if (cfg.lastNotifiedVersionCode > BuildConfig.VERSION_CODE)
+                        "a newer version was offered (code ${cfg.lastNotifiedVersionCode})"
+                    else "no newer version has been offered")
                 for (c in cfg.cameras) {
                     appendLine("• ${c.name} — ${c.host.ifEmpty { "no address" }} — ${Templates.forFamily(c.family).label}" +
                         " — picture by: ${c.main.via.ifEmpty { "not found yet" }}")
                 }
-                if (Store.repairLog.isNotEmpty())
-                    appendLine("Self-repairs: ${Store.repairLog.joinToString("; ")}")
+                val repairs = Store.repairHistory(this@DiagnosticsActivity)
+                if (repairs.isNotEmpty())
+                    appendLine("Self-repairs: ${repairs.joinToString("; ")}")
+                if (Crypto.unlockFailures > 0)
+                    appendLine("Stored logins: ${Crypto.unlockFailures} could not be unlocked on this device — re-enter the camera password in its settings.")
             }
         })
 
@@ -54,7 +84,8 @@ class DiagnosticsActivity : Activity() {
                     val age = if (st.lastFrameAt == 0L) "no picture yet"
                         else "${(System.currentTimeMillis() - st.lastFrameAt) / 1000}s ago"
                     appendLine("• $name — ${st.stateWord} — by ${st.sourceLabel} — at ${st.host} " +
-                               "— last picture $age — road ${st.roadWord} — restarts this hour: ${st.restartsThisHour}")
+                               "— last picture $age — road ${st.roadWord} — restarts this hour: ${st.restartsThisHour}" +
+                               roadStats(name))
                 }
                 for (c in cfg.cameras) {
                     if (!c.enabled) continue
@@ -66,7 +97,10 @@ class DiagnosticsActivity : Activity() {
                         val age = if (st.lastFrameAt == 0L) "no picture yet"
                             else "${(System.currentTimeMillis() - st.lastFrameAt) / 1000}s ago"
                         appendLine("• ${c.name} — ${st.stateWord} — by ${st.sourceLabel} — at ${st.host} " +
-                                   "(identity: ${st.identityAnchor}) — last picture $age — road ${st.roadWord} — restarts this hour: ${st.restartsThisHour}")
+                                   "(identity: ${st.identityAnchor}) — last picture $age — road ${st.roadWord} — restarts this hour: ${st.restartsThisHour}" +
+                                   roadStats(c.name) +
+                                   if (st.identityNote.isNotEmpty()) " — ${st.identityNote}" else "" +
+                                   capsText(c))
                     }
                 }
             }

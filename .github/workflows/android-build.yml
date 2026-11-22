@@ -1,0 +1,53 @@
+name: android-build
+
+# The Android compile + unit-test gate for the house-cameras app.
+# This bench fleet cannot build the tree locally (offline gradle
+# cache / unreachable Google maven), so CI is the gate of record:
+# a green run here is what "current-build APK" means for the
+# proof stage and for any shipped-build claim.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Manifest hygiene gate (Pack H)
+        run: python3 tools/check-manifest.py
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Build APKs
+        run: ./gradlew assembleDebug assembleRelease --no-daemon
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: house-cameras-apks
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore

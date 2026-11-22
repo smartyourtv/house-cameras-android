@@ -26,7 +26,10 @@ object Updater {
         conn.connectTimeout = 5000; conn.readTimeout = 5000
         val o = JSONObject(conn.inputStream.bufferedReader().readText())
         val code = o.optInt("versionCode", 0)
-        if (code > currentCode) Available(code, o.optString("versionName"), o.optString("sha256"))
+        val sha = o.optString("sha256")
+        // Pack C L5: the SHA check is mandatory — a version.json
+        // without a hash offers NO update, never an unverified one.
+        if (code > currentCode && sha.isNotEmpty()) Available(code, o.optString("versionName"), sha)
         else null
     } catch (_: Exception) { null }
 
@@ -48,7 +51,9 @@ object Updater {
             conn.connectTimeout = 8000; conn.readTimeout = 30000
             conn.instanceFollowRedirects = true
             conn.inputStream.use { ins -> dest.outputStream().use { ins.copyTo(it) } }
-            if (expectedSha256.isNotEmpty() && !sha256(dest).equals(expectedSha256, ignoreCase = true))
+            if (expectedSha256.isEmpty())
+                return "The update carries no safety checksum, so it was NOT installed."
+            if (!sha256(dest).equals(expectedSha256, ignoreCase = true))
                 return "Download did not pass its safety check (checksum mismatch). Nothing was installed."
             val uri: Uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", dest)
             val intent = Intent(Intent.ACTION_VIEW).apply {

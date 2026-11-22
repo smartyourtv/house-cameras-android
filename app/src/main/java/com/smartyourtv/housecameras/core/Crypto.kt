@@ -37,6 +37,13 @@ object Crypto {
         return PREFIX + Base64.encodeToString(body, Base64.NO_WRAP)
     }
 
+    /** Pack D L6: a decrypt failure used to return "" silently —
+     *  a lost Keystore key emptied every stored password with no
+     *  trace. Failures now count and stamp themselves here, and
+     *  the store/diagnostics surface them for re-entry. */
+    @Volatile var unlockFailures: Int = 0
+    @Volatile var lastUnlockFailureAt: Long = 0L
+
     fun unprotect(stored: String): String {
         if (stored.isEmpty() || !stored.startsWith(PREFIX)) return stored
         return try {
@@ -46,6 +53,12 @@ object Crypto {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
             String(cipher.doFinal(ct), Charsets.UTF_8)
-        } catch (e: Exception) { "" }  // corrupt entry -> empty, never crash (self-repair logs at store level)
+        } catch (e: Exception) {
+            unlockFailures++
+            lastUnlockFailureAt = System.currentTimeMillis()
+            android.util.Log.e("HouseCameras",
+                "A stored camera login could not be unlocked (${e.javaClass.simpleName}) — it will need re-entering.")
+            ""   // corrupt entry -> empty, never crash; the failure is on record above
+        }
     }
 }

@@ -67,6 +67,27 @@ object SelfTest {
         } catch (e: Exception) {
             out.add(Result("Identity check", false, "${e.message}"))
         }
+        // Relay probe (Pack G L11 + Pack B): when away mode is
+        // configured, the self-test answers the question the tiles
+        // ask — does the relay itself answer? A dead relay is
+        // reported as a relay problem, never as a camera problem.
+        try {
+            val cfgR = Store.load(ctx)
+            if (cfgR.relay.active()) {
+                val up = try {
+                    java.net.Socket().use {
+                        it.connect(java.net.InetSocketAddress(
+                            cfgR.relay.host, cfgR.relay.port), 3000)
+                    }
+                    true
+                } catch (_: Exception) { false }
+                out.add(Result("Home relay (${cfgR.relay.host}:${cfgR.relay.port})", up,
+                    if (up) "The relay answers — away viewing has its road home"
+                    else "The relay does NOT answer — the computer that carries the cameras may be off or asleep"))
+            }
+        } catch (e: Exception) {
+            out.add(Result("Home relay", false, "Could not check: ${e.message}"))
+        }
         // Reports folder writable
         try {
             val f = java.io.File(Reports.dir(ctx), ".probe"); f.writeText("ok"); f.delete()

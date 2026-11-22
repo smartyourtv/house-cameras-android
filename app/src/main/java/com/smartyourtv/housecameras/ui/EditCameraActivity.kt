@@ -48,6 +48,11 @@ class EditCameraActivity : Activity() {
         root.addView(label("Camera family")); root.addView(familySpin)
         root.addView(label("User name")); root.addView(userF)
         root.addView(label("Password")); root.addView(passF); root.addView(credNote)
+        // Leg 5: the shared-login rule, same as the Windows/Linux
+        // app — one fleet, one login, applied on save when ticked.
+        val applyAllBox = CheckBox(this).apply {
+            text = "Use this user name and password for ALL cameras"; isChecked = true }
+        root.addView(applyAllBox)
         root.addView(label("Notes")); root.addView(notesF); root.addView(enabledBox)
 
         val result = TextView(this).apply { textSize = 14f }
@@ -77,6 +82,12 @@ class EditCameraActivity : Activity() {
                 if (tpl.main.path.isNotEmpty()) { cam.main = tpl.main.copy(); cam.sub = tpl.sub.copy() }
             }
             if (isNew) cfg.cameras.add(cam) else cfg.cameras[idx] = cam
+            if (applyAllBox.isChecked && cam.credentials.username.isNotEmpty()) {
+                for (other in cfg.cameras) {
+                    other.credentials.username = cam.credentials.username
+                    other.credentials.password = cam.credentials.password
+                }
+            }
             Store.save(this, cfg)
             Toast.makeText(this, "Saved.", Toast.LENGTH_SHORT).show(); finish()
         }

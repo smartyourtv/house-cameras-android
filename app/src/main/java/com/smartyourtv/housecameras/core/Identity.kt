@@ -21,6 +21,20 @@ object IdentityMatch {
         val serial: String = "", val fingerprint: String = "", val family: String = ""
     )
 
+    /** Identity a WS-Discovery reply carries, as (mac, serial, uuid).
+     *  Only labelled or MAC-shaped values count; an unlabelled hex
+     *  string in a reply is not identity evidence. */
+    fun parseOnvifIdentity(text: String): Triple<String, String, String> {
+        val uuid = Regex("""urn:uuid:[0-9a-fA-F-]{36}""").find(text)?.value ?: ""
+        val mac = Regex("""(?i)(?:[0-9a-f]{2}:){5}[0-9a-f]{2}""").find(text)?.value
+            ?: Regex("""(?i)mac/([0-9a-f]{12})""").find(text)?.groupValues?.get(1)
+            ?: ""
+        val serial = Regex("""(?i)serial/([0-9A-Za-z]+)""").find(text)?.groupValues?.get(1)
+            ?: Regex("""(?i)serial[:=]\s*([0-9A-Za-z]+)""").find(text)?.groupValues?.get(1)
+            ?: ""
+        return Triple(mac, serial, uuid)
+    }
+
     /** Tokens shared by two or more cameras' fingerprints are
      *  VENDOR-GENERIC (siblings run the same firmware and present
      *  identical Server/realm strings — field-proven 2026-11-02

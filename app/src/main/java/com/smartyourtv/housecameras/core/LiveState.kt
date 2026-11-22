@@ -12,6 +12,7 @@ object LiveState {
         @Volatile var sourceLabel: String = "Direct",   // Direct | Relay | Photos
         @Volatile var host: String = "",
         @Volatile var identityAnchor: String = "",
+        @Volatile var identityNote: String = "",   // Pack I L4: ambiguity, on the tile + in Diagnostics
         @Volatile var lastFrameAt: Long = 0L,
         @Volatile var restartsThisHour: Int = 0,
         @Volatile var roadWord: String = "Good"

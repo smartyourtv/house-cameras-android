@@ -8,10 +8,15 @@ import java.util.UUID
 import java.util.concurrent.*
 
 /** All four discovery methods (spec §1.1), results merged.
- *  Unknown hosts are reported, never interrogated beyond banners (§3). */
+ *  Unknown hosts are reported, never interrogated beyond banners (§3).
+ *  Identity fields (Leg 1) are filled from whatever a reply actually
+ *  carries — a scope that names a MAC or serial is evidence; a reply
+ *  that carries none leaves them empty, never guessed. */
 data class FoundHost(
     val host: String, var family: String? = null, var via: String = "",
-    var detail: String = ""
+    var detail: String = "",
+    var mac: String = "", var serial: String = "", var uuid: String = "",
+    var uid: String = ""
 )
 
 object Discovery {
@@ -46,9 +51,11 @@ object Discovery {
                     sock.receive(pkt)
                     val text = String(pkt.data, 0, pkt.length, Charsets.UTF_8)
                     val host = pkt.address.hostAddress ?: continue
-                    if (results.none { it.host == host })
+                    if (results.none { it.host == host }) {
+                        val (mac, serial, uuid) = IdentityMatch.parseOnvifIdentity(text)
                         results.add(FoundHost(host, Templates.identifyFamily(text) ?: "generic",
-                            "onvif", "ONVIF device"))
+                            "onvif", "ONVIF device", mac, serial, uuid))
+                    }
                 } catch (_: SocketTimeoutException) { }
             }
             sock.close()
@@ -101,9 +108,12 @@ object Discovery {
         } catch (_: Exception) { false }
     }
 
-    /** Plain LAN sweep of a /24: connect scan + banner fingerprint. */
+    /** Plain LAN sweep of a /24: connect scan + banner fingerprint.
+     *  An empty prefix sweeps NOTHING — guessing a network is how
+     *  a fresh house gets a silent wrong answer. */
     fun lanSweep(subnetPrefix: String, ports: List<Int> = listOf(554, 80, 8000, 8899, 9000),
                  onFound: (FoundHost) -> Unit = {}): List<FoundHost> {
+        if (subnetPrefix.isEmpty()) return emptyList()
         val results = Collections.synchronizedList(mutableListOf<FoundHost>())
         val pool = Executors.newFixedThreadPool(48)
         val futures = mutableListOf<Future<*>>()
@@ -156,12 +166,23 @@ object Discovery {
             if (prev == null) byHost[fh.host] = fh
             else {
                 if (prev.family == "generic" && fh.family != "generic") prev.family = fh.family
+                if (prev.mac.isEmpty()) prev.mac = fh.mac
+                if (prev.serial.isEmpty()) prev.serial = fh.serial
+                if (prev.uuid.isEmpty()) prev.uuid = fh.uuid
+                if (prev.uid.isEmpty()) prev.uid = fh.uid
                 prev.via += "+" + fh.via
             }
         }
         return byHost.values.toList()
     }
 
+    /** The phone's own /24, read from its Wi-Fi address — or ""
+     *  when that can't be read. NEVER a baked-in house prefix
+     *  (owner direction, 2026-11-22: nothing may assume this
+     *  house's network): an earlier version fell back to this
+     *  house's subnet, which at a stranger's house would silently
+     *  sweep the wrong network and report "no cameras." An honest
+     *  "" lets the caller say it couldn't tell, in plain words. */
     fun localSubnetPrefix(ctx: android.content.Context): String {
         try {
             val wifi = ctx.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE)
@@ -170,6 +191,6 @@ object Discovery {
             val ip = wifi.connectionInfo.ipAddress
             if (ip != 0) return "${ip and 0xff}.${(ip shr 8) and 0xff}.${(ip shr 16) and 0xff}"
         } catch (_: Exception) { }
-        return "192.168.40"
+        return ""
     }
 }

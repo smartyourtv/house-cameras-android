@@ -96,8 +96,13 @@ version. Foundation: `~/workspace/house-cameras-windows/docs/DESIGN.md` +
    in grid keep decode load and data use low. (Windows was mains-class.)
 
 ## Out of scope for v1
-Recording/DVR, PTZ (template fields reserved), two-way talk,
-PPPP/PPCS LAN-direct leg (only if the queued ThinkPad test proves it).
+Recording/DVR — REMOVED from this list, superseded by the owner
+ruling of 2026-11-06: recording is IN scope (viewer + DVR, one
+total package, both platforms). The governing text is DESIGN-V2.md,
+"Owner ruling (2026-11-06) — recording in scope". This v1 document
+is otherwise historical. PTZ (template fields reserved), two-way
+talk, PPPP/PPCS LAN-direct leg (only if the queued ThinkPad test
+proves it).
 
 ## Coordination
 No live-camera load from this lane beyond ordinary viewing pulls.

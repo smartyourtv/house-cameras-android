@@ -27,7 +27,7 @@ class SettingsActivity : Activity() {
         root.addView(TextView(this).apply {
             textSize = 13f
             text = "At home, the app talks straight to the cameras. Away, it never talks to the cameras at all — " +
-                   "it talks only to the small relay running at home (on the ThinkPad, at its Tailscale address 100.78.8.93). " +
+                   "it talks only to the small relay running at home (on the home computer, at its private network address — set below). " +
                    "The relay is normally OFF — that is its resting state, not a fault. A viewing session is started at home " +
                    "(ask Scout), and each session has its own fresh code: the user name is always \"scout\" and the code is the password. " +
                    "A session closes itself after about 10 minutes with nobody watching, and never runs longer than 2 hours — " +

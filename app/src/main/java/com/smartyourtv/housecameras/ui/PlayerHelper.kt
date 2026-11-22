@@ -66,6 +66,59 @@ class CameraPlayer(
     private var viewRef: PlayerView? = null
 
     private var fallbackImageRef: android.widget.ImageView? = null
+    private var handoverHeld = false
+
+    // Pack B: relay-liveness probe state — distinct from per-tile
+    // retries, so "relay down" is never misread as "session over".
+    @Volatile private var relayDown: Boolean? = null
+    @Volatile private var relayProbedAt: Long = 0L
+
+    private fun probeRelay() {
+        val host = relay.host; val port = relay.port
+        relayProbedAt = System.currentTimeMillis()
+        kotlin.concurrent.thread(name = "relay-probe") {
+            val up = try {
+                java.net.Socket().use {
+                    it.connect(java.net.InetSocketAddress(host, port), 3000)
+                }
+                true
+            } catch (_: Exception) { false }
+            relayDown = !up
+            if (!up) com.smartyourtv.housecameras.core.Reports.event(
+                ctx, "RELAY: $host:$port does not answer — the relay is down, not a session problem")
+            handler.post { if (!stopped && relay.active()) status(relayStatusText()) }
+        }
+    }
+
+    private fun relayStatusText(): String = when (relayDown) {
+        true -> "The relay at home isn't answering — the computer that carries the cameras " +
+                "may be off or asleep. The app keeps checking and the picture will return on its own."
+        false -> "Not connected — no viewing session is open, or the session code has expired. " +
+                 "A session is started at home and gives you a fresh code each time."
+        null -> "Checking whether the relay at home is answering…"
+    }
+
+    /** Copy the player view's current frame into the overlay image
+     *  and show it, so a restart holds the picture instead of
+     *  flashing black (amendment 5). Best effort: any failure just
+     *  leaves the old behaviour. */
+    private fun holdCurrentFrame(view: PlayerView) {
+        val img = fallbackImageRef ?: return
+        val surface = view.getChildAt(0) as? android.view.SurfaceView ?: return
+        if (surface.width <= 0 || surface.height <= 0) return
+        try {
+            val bmp = android.graphics.Bitmap.createBitmap(
+                surface.width, surface.height,
+                android.graphics.Bitmap.Config.ARGB_8888)
+            android.view.PixelCopy.request(surface, bmp, { result ->
+                if (result == android.view.PixelCopy.SUCCESS && !stopped) {
+                    img.setImageBitmap(bmp)
+                    img.visibility = android.view.View.VISIBLE
+                    handoverHeld = true
+                }
+            }, handler)
+        } catch (_: Exception) {}
+    }
 
     // --- v2 supervisor state ---
     private val policy = com.smartyourtv.housecameras.core.RestartPolicy()
@@ -80,14 +133,34 @@ class CameraPlayer(
 
     private fun status(s: String) {
         val st = com.smartyourtv.housecameras.core.LiveState.state(cam.name)
-        st.stateWord = s; st.host = cam.host
+        // Pack I L4: an identity-ambiguity note rides the tile text
+        // until the resolver clears it — it is not only a log line.
+        val shown = if (st.identityNote.isNotEmpty() && !s.contains(st.identityNote))
+            "$s · ${st.identityNote}" else s
+        st.stateWord = shown; st.host = cam.host
         st.identityAnchor = cam.identity.anchorDescription()
         st.sourceLabel = sourceLabelOverride
             ?: when { relay.active() -> "Relay"; photosMode -> "Photos"; else -> "Direct" }
         st.lastFrameAt = lastGoodFrameAt
         st.restartsThisHour = policy.restartsThisHour()
         st.roadWord = meter.quality()
-        onStatus(s, lastGoodFrameAt)
+        onStatus(shown, lastGoodFrameAt)
+    }
+
+    /** Pack I L2: player/library error names never reach a tile.
+     *  The tile gets plain words; the raw code goes to the event
+     *  log (scheduleRetry logs it where the retry is scheduled). */
+    private fun plainReason(reason: String): String = when {
+        reason.contains("AUTH", true) || reason.contains("401") || reason.contains("403") ->
+            "the camera refused the login"
+        reason.contains("PARSING", true) || reason.contains("format", true) ->
+            "the picture format couldn't be read"
+        reason.contains("TIMEOUT", true) || reason.contains("no picture", true) ->
+            "the camera didn't answer in time"
+        reason.contains("IO", true) || reason.contains("network", true) ->
+            "the connection dropped"
+        reason.contains("froze") || reason.contains("ended") -> "the stream stopped"
+        else -> "a connection problem"
     }
 
     private fun noteFrame() {
@@ -147,6 +220,20 @@ class CameraPlayer(
         viewRef = view
         fallbackImageRef = fallbackImage
         attempts = 0
+        // D4 seat: the playback path checks the camera record's
+        // viewers allowance from day one — exactly one identity
+        // ("household") exists today, and the check lives HERE, in
+        // the one place every view starts, so a future per-user
+        // identity never has to retrofit authorisation onto the
+        // player.
+        val allowed = cam.viewers.split(",").map { it.trim() }
+        if ("household" !in allowed) {
+            stopped = true
+            status("Not on this viewer's list for ${cam.name}")
+            com.smartyourtv.housecameras.core.Reports.event(
+                "VIEW", cam.name, "viewer household not in allowance (${cam.viewers}) — view refused")
+            return
+        }
         status("Connecting…")
         handler.removeCallbacks(watchdog); handler.postDelayed(watchdog, 2000)
         if (feedProbe) { probeThenPlay(); return }
@@ -209,6 +296,14 @@ class CameraPlayer(
         if (stopped) return
         val view = viewRef ?: return
         try {
+        // Amendment 5 — the tile-flash hand-over fix (go2rtc-style,
+        // make-before-break): before the old player is released,
+        // copy its last frame into the overlay image and show it;
+        // the new player's first frame hides it again. A restart
+        // then reads as a held picture, not a black flash. When
+        // there is no frame worth holding (first start, or the
+        // copy fails), behaviour is exactly as before.
+        if (firstFrameSeen) holdCurrentFrame(view)
         try { player?.release() } catch (_: Exception) {}
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -237,7 +332,12 @@ class CameraPlayer(
         p.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() {
                 attempts = 0
+                relayDown = null   // healed: the next outage re-probes
                 firstFrameSeen = true
+                if (handoverHeld) {
+                    handoverHeld = false
+                    fallbackImageRef?.visibility = android.view.View.GONE
+                }
                 policy.onFrame()
                 meter.connected(System.currentTimeMillis() - connectStartedAt)
                 com.smartyourtv.housecameras.core.Breaker.reportHealthy(cam.name)
@@ -273,6 +373,14 @@ class CameraPlayer(
         retryPending = true
         attempts++
         meter.reconnect()
+        // Pack B H5: a CONNECT failure feeds the breaker too — it
+        // used to count only frozen pictures, so a total outage
+        // (relay down, road down) produced no road-level signal.
+        if (!firstFrameSeen) {
+            com.smartyourtv.housecameras.core.Breaker.reportStall(
+                cam.name, System.currentTimeMillis())
+            updateBreakerMessage()
+        }
         try { player?.release() } catch (_: Exception) {}
         player = null
         if (relay.active()) {
@@ -280,12 +388,19 @@ class CameraPlayer(
                 status("Connecting… a camera can take up to half a minute to appear after a session starts.")
                 handler.postDelayed({ retryPending = false; startPlayer() }, 4000)
             } else {
-                // The relay is STOPPED at rest — after the tolerance
-                // window, a failure means no session is open, or the
-                // session code is wrong/expired. Say that plainly —
-                // and keep a quiet slow lane: a session may start later.
-                status("Not connected — no viewing session is open, or the session code has expired. " +
-                         "A session is started at home and gives you a fresh code each time.")
+                // Pack B H4: after the tolerance window, PROBE the
+                // relay before blaming the session — a dead relay
+                // and an expired code are different problems and
+                // the tile must say which. The probe re-runs at
+                // most once a minute; a session may start later,
+                // so the slow lane keeps turning either way.
+                val nowMs = System.currentTimeMillis()
+                if (relayDown == null || nowMs - relayProbedAt > 60_000) {
+                    probeRelay()
+                    status("Checking whether the relay at home is answering…")
+                } else {
+                    status(relayStatusText())
+                }
                 handler.postDelayed({ retryPending = false; startPlayer() }, 60_000)
             }
         } else {
@@ -297,7 +412,11 @@ class CameraPlayer(
                 // stays — no burst-phase churn in front of it.
                 status(downMessage ?: "No signal")
             } else if (policy.inSlowLane) {
-                status(downMessage ?: "No signal — still trying every minute (last problem: $reason)")
+                // Pack I L2: plain words on the tile; the raw
+                // library code goes to the event log only.
+                if (!wasSlow) com.smartyourtv.housecameras.core.Reports.event(
+                    ctx, "RETRY: ${cam.name} — slow lane (raw problem: $reason)")
+                status(downMessage ?: "No signal — still trying every minute (last problem: ${plainReason(reason)})")
                 if (!wasSlow && !resolveTriedInSlowLane && identityManaged) {
                     // Burst spent with no picture: maybe the camera
                     // MOVED. Ask the resolver once per slow-lane entry.

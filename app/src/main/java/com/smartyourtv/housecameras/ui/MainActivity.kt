@@ -24,9 +24,15 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
     private lateinit var cfg: AppConfig
     private val players = mutableListOf<CameraPlayer>()
+    // Leg 4: tiles with a live player register their status line
+    // here; the 3s tick re-renders it from LiveState with the
+    // frame age, so state + age show in every reader from one
+    // source — the same words the diagnostics card reads.
+    private val tileStatus = mutableMapOf<String, TextView>()
     private lateinit var stage: LinearLayout
     private lateinit var modeLabel: TextView
     private lateinit var banner: TextView
+    private lateinit var updateBanner: TextView
     private var view: StageSpec.View = StageSpec.HOUSE
     private var resolving = false
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -76,16 +82,38 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(2), dp(8), dp(2)); visibility = View.GONE
         }
         root.addView(banner)
+        // Pack K L9: a PERSISTENT update indicator (the old notice
+        // was a one-shot Toast that vanished). Tap opens Settings
+        // (where the install lives); long-press dismisses it for
+        // this version only.
+        updateBanner = TextView(this).apply {
+            setTextColor(Color.rgb(140, 220, 140)); textSize = 13f
+            setPadding(dp(8), dp(2), dp(8), dp(2)); visibility = View.GONE
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+            }
+            setOnLongClickListener {
+                cfg.updateNoticeDismissed = cfg.lastNotifiedVersionCode
+                Store.save(this@MainActivity, cfg)
+                visibility = View.GONE
+                true
+            }
+        }
+        root.addView(updateBanner)
         stage = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
         refreshModeLabel()
+        refreshUpdateBanner()
     }
 
     private fun refreshModeLabel() {
-        modeLabel.text = if (cfg.relay.active())
+        // Pack G P4: a small persistent road word rides the header
+        // ("Road: Good / Shaky / Bad"), not only the bad-road banner.
+        val base = if (cfg.relay.active())
             "Away — through the home relay"
         else "At home — direct from your cameras"
+        modeLabel.text = "$base · Road: ${LiveState.roadSummary()}"
     }
 
     private fun switchView(v: StageSpec.View) {
@@ -113,6 +141,19 @@ class MainActivity : Activity() {
             }
             banner.text = msg
             banner.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
+            refreshModeLabel()   // Pack G P4: the header road word stays current
+            // Leg 4: every live tile re-renders its state + frame
+            // age from LiveState on this same tick.
+            for ((name, tv) in tileStatus) {
+                val st = LiveState.state(name)
+                val ageMs = if (st.lastFrameAt > 0) now - st.lastFrameAt else -1L
+                val ageTxt = when {
+                    ageMs < 2_000 -> ""
+                    ageMs < 90_000 -> " · picture ${ageMs / 1000}s old"
+                    else -> " · picture ${ageMs / 60_000}m old"
+                }
+                tv.text = "$name — ${st.stateWord}$ageTxt"
+            }
             uiHandler.postDelayed(this, 3000)
         }
     }
@@ -122,6 +163,7 @@ class MainActivity : Activity() {
         cfg = Store.load(this)
         view = StageSpec.byName(cfg.homeView)
         refreshModeLabel()
+        refreshUpdateBanner()
         players.forEach { it.release() }; players.clear()
         stage.removeAllViews()
         uiHandler.removeCallbacks(bannerTick); uiHandler.post(bannerTick)
@@ -171,6 +213,7 @@ class MainActivity : Activity() {
 
     private fun buildStage() {
         players.forEach { it.release() }; players.clear()
+        tileStatus.clear()
         stage.removeAllViews()
         val tiles = tilesForView()
         var firstTile: View? = null
@@ -241,7 +284,8 @@ class MainActivity : Activity() {
                     onHostHealed = { Store.save(this, cfg) }) { s, _ ->
                     runOnUiThread { status.text = "${cam.name} — $s" }
                 }
-                players.add(cp); cp.startSnapshotPolling(img)
+                players.add(cp); tileStatus[cam.name] = status
+                cp.startSnapshotPolling(img)
             }
             cam.host.isEmpty() && !cfg.relay.active() -> {
                 inner.addView(TextView(this).apply {
@@ -269,7 +313,8 @@ class MainActivity : Activity() {
                     onHostHealed = { Store.save(this, cfg) }) { s, _ ->
                     runOnUiThread { status.text = "${cam.name} — $s" }
                 }
-                players.add(cp); cp.attachToPlayerView(pv, fallbackImg)
+                players.add(cp); tileStatus[cam.name] = status
+                cp.attachToPlayerView(pv, fallbackImg)
             }
         }
         inner.addView(status, statusLp)
@@ -300,17 +345,21 @@ class MainActivity : Activity() {
         val i = Intent(this, EditCameraActivity::class.java); i.putExtra("index", index); startActivity(i)
     }
 
+    private fun refreshUpdateBanner() {
+        val newer = cfg.lastNotifiedVersionCode > BuildConfig.VERSION_CODE &&
+            cfg.lastNotifiedVersionCode != cfg.updateNoticeDismissed
+        updateBanner.visibility = if (newer) View.VISIBLE else View.GONE
+        if (newer) updateBanner.text =
+            "A House Cameras update is available — tap to open Settings and install it (hold to dismiss)."
+    }
+
     private fun checkForUpdateQuietly() {
         thread(name = "updater-check") {
             val avail = Updater.check(BuildConfig.VERSION_CODE) ?: return@thread
             if (cfg.lastNotifiedVersionCode >= avail.versionCode) return@thread
             cfg.lastNotifiedVersionCode = avail.versionCode
             Store.save(this, cfg)
-            runOnUiThread {
-                Toast.makeText(this,
-                    "House Cameras update ${avail.versionName} is available — open Settings to install it.",
-                    Toast.LENGTH_LONG).show()
-            }
+            runOnUiThread { refreshUpdateBanner() }
         }
     }
 }

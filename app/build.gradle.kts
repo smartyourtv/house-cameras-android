@@ -29,6 +29,19 @@ android {
             if (hasSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
+    // Pack C M3: release signing is fail-CLOSED. Without the signing
+    // env, a release task stops instead of silently shipping an
+    // unsigned build. Debug tasks are unaffected.
+    gradle.taskGraph.whenReady {
+        val wantsRelease = allTasks.any {
+            it.name.contains("Release") && it.name != "processReleaseResources"
+        }
+        if (wantsRelease && !hasSigning) {
+            throw GradleException(
+                "Release signing is not configured (KEYSTORE_* env missing) — " +
+                "refusing to build an unsigned release.")
+        }
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { buildConfig = true }
@@ -39,5 +52,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.8.1")
     implementation("androidx.media3:media3-exoplayer-rtsp:1.8.1")
     implementation("androidx.media3:media3-ui:1.8.1")
+    // LeakCanary, debug builds only (HQ debugging kit, 2026-11-18);
+    // release builds never see it.
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
     testImplementation("junit:junit:4.13.2")
 }

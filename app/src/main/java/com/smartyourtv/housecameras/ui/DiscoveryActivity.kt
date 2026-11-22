@@ -23,7 +23,11 @@ class DiscoveryActivity : Activity() {
         val intro = TextView(this).apply {
             textSize = 14f
             text = "This searches your home network four different ways at once. It takes about half a minute. " +
-                   "Things that are found but aren't cameras are listed too — they are only looked at, never changed."
+                   "Things that are found but aren't cameras are listed too — they are only looked at, never changed. " +
+                   // Pack I L3: the cloud-only limit, stated BEFORE
+                   // any Add tap — not after the ladder has failed.
+                   "Cameras that only work through a maker's cloud app (Ring, Blink, stock Wyze, Nest) " +
+                   "will not appear here — they offer nothing on the home network."
         }
         root.addView(intro)
         val btn = Button(this).apply { text = "Start searching" }
@@ -49,7 +53,10 @@ class DiscoveryActivity : Activity() {
                 runOnUiThread {
                     btn.isEnabled = true
                     if (merged.isEmpty()) {
-                        listText.text = "Nothing answered. Make sure the phone is on the same home Wi-Fi as the cameras, then try again."
+                        listText.text = if (prefix.isEmpty())
+                            "The phone's network couldn't be read, so the local search didn't run. " +
+                            "Make sure Wi-Fi is on and connected to the home network, then try again."
+                        else "Nothing answered. Make sure the phone is on the same home Wi-Fi as the cameras, then try again."
                     } else {
                         listText.text = merged.joinToString("\n") {
                             "${it.host} — ${it.family ?: "unknown"} (found by ${it.via}) ${it.detail}"

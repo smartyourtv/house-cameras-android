@@ -17,8 +17,10 @@ import kotlin.concurrent.thread
 object Resolver {
 
     /** Fleet-generic banner tokens, recomputed on every resolveAll
-     *  pass and reused by single-camera resolves (the supervisor's
-     *  slow-lane path). Generic tokens can never prove identity. */
+     *  pass (§1.4(4)) and held here as the fallback for callers that
+     *  cannot load the fleet; single-camera resolves compute their
+     *  own set from the stored config first. Generic tokens can
+     *  never prove identity. */
     @Volatile var genericCache: Set<String> = emptySet()
     enum class FastPath { VERIFIED, STRANGER, DEAD, UNKNOWN }
 
@@ -49,17 +51,21 @@ object Resolver {
      *  one came back empty/partial, or the two OVERLAP on any token.
      *  STRANGER requires a full house: something answers, and its
      *  complete fingerprint shares NOTHING with the stored one. */
-    fun fastPath(cam: Camera): FastPath {
+    fun fastPath(cam: Camera, generic: Set<String> = genericCache): FastPath {
         if (cam.host.isEmpty()) return FastPath.DEAD
-        val (describeOk, fp) = probe(cam, cam.host)
+        // Pack K L10: UNKNOWN used to be unreachable dead code. It
+        // now means what the self-test always said it meant — the
+        // check itself could not be completed (the probe threw).
+        val (describeOk, fp) = try { probe(cam, cam.host) }
+            catch (_: Exception) { return FastPath.UNKNOWN }
         val stored = cam.identity.fingerprint
         // STRANGER requires DISCRIMINATING disagreement: both sides
         // hold device-specific tokens and they share none. No
         // discriminating tokens on a side = no judgment from the
         // fingerprint at all (a sibling at this address is then
         // indistinguishable — the documented fleet limit).
-        val storedDisc = IdentityMatch.fingerprintTokens(stored) - genericCache
-        val freshDisc = IdentityMatch.fingerprintTokens(fp) - genericCache
+        val storedDisc = IdentityMatch.fingerprintTokens(stored) - generic
+        val freshDisc = IdentityMatch.fingerprintTokens(fp) - generic
         return when {
             describeOk && (stored.isEmpty() || fp.isEmpty() ||
                 storedDisc.isEmpty() || freshDisc.isEmpty() ||
@@ -71,11 +77,26 @@ object Resolver {
 
     /** Resolve one camera. Returns a plain-words heal message when
      *  the address changed, else null. Mutates cam.host/identity on
-     *  success — the CALLER saves config. */
-    fun resolveOne(ctx: Context, cam: Camera): String? {
+     *  success — the CALLER saves config.
+     *
+     *  The generic set is a FLEET product (§1.4(4)): computed from
+     *  every camera's stored fingerprint on every pass. Callers with
+     *  the fleet pass it in; a lone caller gets it from the stored
+     *  config; only a config that cannot be read falls back to the
+     *  shared cache. (036 H2: this set used to be declared and never
+     *  computed in production, so sibling banners scored as identity.) */
+    fun resolveOne(ctx: Context, cam: Camera, fleet: List<Camera>? = null): String? {
+        val generic: Set<String> = when {
+            fleet != null -> IdentityMatch.genericTokens(
+                fleet.map { it.identity.fingerprint })
+            else -> try {
+                IdentityMatch.genericTokens(
+                    Store.load(ctx).cameras.map { it.identity.fingerprint })
+            } catch (_: Exception) { genericCache }
+        }
         val state = LiveState.state(cam.name)
         state.host = cam.host; state.identityAnchor = cam.identity.anchorDescription()
-        when (fastPath(cam)) {
+        when (fastPath(cam, generic)) {
             FastPath.VERIFIED -> {
                 if (cam.identity.fingerprint.isEmpty()) {
                     val fp = fingerprint(cam.host)
@@ -88,6 +109,8 @@ object Resolver {
             else -> { /* DEAD or STRANGER: sweep */ }
         }
         val subnet = Discovery.localSubnetPrefix(ctx)
+        if (subnet.isEmpty())
+            Reports.event(ctx, "SWEEP: ${cam.name} — the phone's network couldn't be read; local sweep skipped (broadcast finds still apply)")
         val found = Discovery.merge(
             try { Discovery.onvif(1500, ctx) } catch (_: Exception) { emptyList() },
             try { Discovery.hip2pVscp(1200) } catch (_: Exception) { emptyList() },
@@ -103,28 +126,84 @@ object Resolver {
             val src = if (tpl.sub.path.isNotEmpty()) tpl.sub else tpl.main
             val ok = try { Ingest.rtspDescribe(ghost, src) } catch (_: Exception) { false }
             if (!ok) continue
+            // Hard identifiers ride along (036 M7: sweep evidence used
+            // to carry none, so the score-3 paths could never fire in
+            // production). The serial comes from the discovery reply
+            // when it labelled one, else from a unicast ONVIF read at
+            // the candidate — the fleet's working LAN anchor.
+            val serial = fh.serial.ifEmpty {
+                try { Ingest.onvifDeviceSerial(ghost) } catch (_: Exception) { "" }
+            }
             candidates.add(fh.host to IdentityMatch.Evidence(
+                mac = fh.mac, uuid = fh.uuid, uid = fh.uid,
+                serial = serial,
                 fingerprint = fingerprint(fh.host), family = cam.family))
         }
         if (candidates.isNotEmpty())
             Reports.event(ctx, "SWEEP: ${cam.name} — ${candidates.size} candidate(s): " +
-                candidates.joinToString(", ") { "${it.first} (score ${IdentityMatch.score(cam.identity, it.second, cam.family, genericCache)})" })
-        return when (val d = IdentityMatch.select(cam.identity, candidates, cam.family, genericCache)) {
+                candidates.joinToString(", ") { "${it.first} (score ${IdentityMatch.score(cam.identity, it.second, cam.family, generic)})" })
+        return when (val d = IdentityMatch.select(cam.identity, candidates, cam.family, generic)) {
             is IdentityMatch.Decision.Adopt -> {
-                val old = cam.host
-                cam.host = d.host
-                val fp = fingerprint(d.host)
-                if (fp.isNotEmpty()) cam.identity.fingerprint = fp
-                cam.identity.lastVerifiedAt = System.currentTimeMillis()
-                state.host = d.host
-                val msg = "${cam.name} moved $old → ${d.host} — identity proven " +
-                          "(${cam.identity.anchorDescription()}, match ${d.score})"
-                Reports.event(ctx, "HEAL: $msg")
-                msg
+                // §1.4(3): identity match PLUS a pulled picture. The
+                // match alone never moves the record — a frame must
+                // actually decode at the new address (the family's
+                // snapshot is a real picture; families without one
+                // keep the ladder's DESCRIBE standard, and the event
+                // log says which grade proved it).
+                val ghost = cam.copy(host = d.host)
+                val tpl = Templates.forFamily(cam.family)
+                val framed = tpl.snapshot.isEmpty() ||
+                    (try { Ingest.fetchSnapshot(ghost, tpl.snapshot) }
+                     catch (_: Exception) { false })
+                if (!framed) {
+                    Reports.event(ctx, "IDENTITY: ${cam.name} — match at ${d.host} " +
+                        "could not pull a picture there; not adopting. " +
+                        "A match alone is not proof.")
+                    null
+                } else {
+                    val old = cam.host
+                    cam.host = d.host
+                    com.smartyourtv.housecameras.core.LiveState.state(cam.name).identityNote = ""
+                    // Future-proofing amendment: a proven camera's
+                    // record learns what the camera says about
+                    // ITSELF — capabilities by interrogation, never
+                    // assumed from the family. Its events come from
+                    // frame analysis until native events feed the bus.
+                    try {
+                        Ingest.onvifCapabilities(cam)?.let { cam.capabilities = it }
+                    } catch (_: Exception) {}
+                    if (cam.eventSource.isEmpty()) cam.eventSource = "frame"
+                    val fp = fingerprint(d.host)
+                    if (fp.isNotEmpty()) cam.identity.fingerprint = fp
+                    // Learn the hard identity the winning evidence
+                    // carried — filled only from proof, only into
+                    // empty fields, so the next pass anchors harder.
+                    val winEv = candidates.firstOrNull { it.first == d.host }?.second
+                    if (winEv != null) {
+                        if (cam.identity.mac.isEmpty() && winEv.mac.isNotEmpty())
+                            cam.identity.mac = IdentityMatch.normMac(winEv.mac)
+                        if (cam.identity.onvifSerial.isEmpty() && winEv.serial.isNotEmpty())
+                            cam.identity.onvifSerial = winEv.serial
+                        if (cam.identity.onvifUuid.isEmpty() && winEv.uuid.isNotEmpty())
+                            cam.identity.onvifUuid = winEv.uuid
+                        if (cam.identity.hip2pUid.isEmpty() && winEv.uid.isNotEmpty())
+                            cam.identity.hip2pUid = winEv.uid
+                    }
+                    cam.identity.lastVerifiedAt = System.currentTimeMillis()
+                    state.host = d.host
+                    val msg = "${cam.name} moved $old → ${d.host} — identity proven " +
+                              "(${cam.identity.anchorDescription()}, match ${d.score})"
+                    Reports.event(ctx, "HEAL: $msg")
+                    msg
+                }
             }
             is IdentityMatch.Decision.Ambiguous -> {
-                Reports.event(ctx, "IDENTITY: ${cam.name} — two possible matches " +
-                    "(${d.hosts.joinToString(", ")}); not guessing, tile left as-is")
+                // Pack I L4: ambiguity is a TILE message, not only
+                // an event-log line — and it stays in Diagnostics.
+                val note = "two possible matches (${d.hosts.joinToString(", ")}) — " +
+                    "not guessing; check Diagnostics"
+                com.smartyourtv.housecameras.core.LiveState.state(cam.name).identityNote = note
+                Reports.event(ctx, "IDENTITY: ${cam.name} — $note; tile left as-is")
                 null
             }
             IdentityMatch.Decision.None -> {
@@ -141,9 +220,14 @@ object Resolver {
         if (cfg.relay.active()) return false   // cameras are not on this network when away
         val cams = cfg.cameras.filter { it.enabled && it.host.isNotEmpty() }
         if (cams.isEmpty()) return false
+        // The generic set is recomputed on EVERY pass from the whole
+        // fleet's stored fingerprints (§1.4(4)) — 036 H2's cure: the
+        // field existed and was never populated in production.
+        genericCache = IdentityMatch.genericTokens(
+            cfg.cameras.map { it.identity.fingerprint })
         val before = cams.map { it.host }
         val pool = Executors.newFixedThreadPool(minOf(4, cams.size))
-        val futures = cams.map { cam -> pool.submit { try { resolveOne(ctx, cam) } catch (_: Exception) {} } }
+        val futures = cams.map { cam -> pool.submit { try { resolveOne(ctx, cam, cfg.cameras) } catch (_: Exception) {} } }
         futures.forEach { try { it.get(45, TimeUnit.SECONDS) } catch (_: Exception) {} }
         pool.shutdown()
         return cams.map { it.host } != before

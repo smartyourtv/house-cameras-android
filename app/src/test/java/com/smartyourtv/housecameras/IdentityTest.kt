@@ -97,4 +97,34 @@ class IdentityTest {
             "192.168.40.87" to IdentityMatch.Evidence(family = "hip2p")), "hip2p")
         assertEquals(IdentityMatch.Decision.None, d)
     }
+    @Test fun serialEvidenceIsStrong() {
+        // Production shape after the M7 fix: the sweep's unicast ONVIF
+        // read puts the candidate's serial into Evidence, and it
+        // anchors at full grade against the stored serial.
+        val withSerial = id.copy(onvifSerial = "7ca7b036effc")
+        assertEquals(3, IdentityMatch.score(withSerial,
+            IdentityMatch.Evidence(serial = "7ca7b036effc", family = "hip2p"), "hip2p"))
+        assertEquals(0, IdentityMatch.score(withSerial,
+            IdentityMatch.Evidence(serial = "001122334455", family = "hip2p"), "hip2p"))
+    }
+    @Test fun onvifReplyIdentityParses() {
+        val reply = """<s:Envelope><s:Body><d:ProbeMatches><d:ProbeMatch>
+            <a:EndpointReference><a:Address>urn:uuid:123e4567-e89b-12d3-a456-426614174000</a:Address></a:EndpointReference>
+            <d:Scopes>onvif://www.onvif.org/mac/7CA7B036EFFC onvif://www.onvif.org/serial/7ca7b036effc onvif://www.onvif.org/name/IPCAM</d:Scopes>
+            </d:ProbeMatch></d:ProbeMatches></s:Body></s:Envelope>"""
+        val (mac, serial, uuid) = IdentityMatch.parseOnvifIdentity(reply)
+        assertEquals("7CA7B036EFFC", mac)
+        assertEquals("7ca7b036effc", serial)
+        assertEquals("urn:uuid:123e4567-e89b-12d3-a456-426614174000", uuid)
+        // An unlabelled reply carries no identity — nothing is guessed.
+        assertEquals(Triple("", "", ""), Discovery.parseOnvifIdentity("<x>hello</x>"))
+    }
+    @Test fun uidImportLandsInIdentityStore() {
+        // Implement-list item 4: a UID copied from the recorder's
+        // config into the record anchors at full grade when a reply
+        // ever carries it.
+        val withUid = id.copy(hip2pUid = "TTTT-904785-EJVVR")
+        assertEquals(3, IdentityMatch.score(withUid,
+            IdentityMatch.Evidence(uid = "TTTT-904785-EJVVR")))
+    }
 }

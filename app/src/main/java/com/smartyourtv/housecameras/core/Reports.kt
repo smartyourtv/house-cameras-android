@@ -33,8 +33,20 @@ object Reports {
             }
         }
         val name = "HouseCameras-crash-${stamp.format(Date())}.txt"
-        try { File(dir(ctx), name).writeText(text) } catch (_: Exception) {}
+        // Pack F L8: a report that fails to write must not vanish
+        // silently — the failure itself is reported (event log +
+        // Android log), and the Downloads copy is the second chance.
+        var landed = false
+        try { File(dir(ctx), name).writeText(text); landed = true }
+        catch (e: Exception) {
+            android.util.Log.e("HouseCameras",
+                "Crash report could not be written in-app (${e.javaClass.simpleName})")
+        }
         writeToDownloads(ctx, name, text)
+        if (!landed) {
+            try { event(ctx, "A crash report could not be saved in-app; a copy was attempted in Downloads.") }
+            catch (_: Exception) {}
+        }
     }
 
     private fun writeToDownloads(ctx: Context, name: String, text: String) {
