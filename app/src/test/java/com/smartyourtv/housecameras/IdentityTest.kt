@@ -117,7 +117,7 @@ class IdentityTest {
         assertEquals("7ca7b036effc", serial)
         assertEquals("urn:uuid:123e4567-e89b-12d3-a456-426614174000", uuid)
         // An unlabelled reply carries no identity — nothing is guessed.
-        assertEquals(Triple("", "", ""), Discovery.parseOnvifIdentity("<x>hello</x>"))
+        assertEquals(Triple("", "", ""), IdentityMatch.parseOnvifIdentity("<x>hello</x>"))
     }
     @Test fun uidImportLandsInIdentityStore() {
         // Implement-list item 4: a UID copied from the recorder's
