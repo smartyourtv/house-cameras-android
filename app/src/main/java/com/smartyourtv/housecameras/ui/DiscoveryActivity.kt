@@ -76,11 +76,19 @@ class DiscoveryActivity : Activity() {
             val c2 = Store.load(this@DiscoveryActivity)
             c2.cameras.add(Camera(name = "camera-${c2.cameras.size + 1}", host = fh.host,
                 family = fh.family ?: "generic"))
-            Store.save(this@DiscoveryActivity, c2)
-            Toast.makeText(this@DiscoveryActivity,
-                "Added. Open it from the main screen (press and hold) to enter its password and find its picture.",
-                Toast.LENGTH_LONG).show()
-            b.isEnabled = false
+            // 0b Finding 1: a refused save is said in plain words —
+            // never a crash, and never an "Added" that didn't happen.
+            when (val r = Store.save(this@DiscoveryActivity, c2)) {
+                is Store.SaveResult.Saved -> {
+                    Toast.makeText(this@DiscoveryActivity,
+                        "Added. Open it from the main screen (press and hold) to enter its password and find its picture.",
+                        Toast.LENGTH_LONG).show()
+                    b.isEnabled = false
+                }
+                is Store.SaveResult.Refused -> android.app.AlertDialog.Builder(this@DiscoveryActivity)
+                    .setTitle("Camera not added").setMessage(r.reason)
+                    .setPositiveButton("OK", null).show()
+            }
         }
         root.addView(b)
     }

@@ -21,14 +21,20 @@ object SelfTest {
         } catch (e: Exception) {
             out.add(Result("Settings file", false, "Could not load: ${e.message}"))
         }
-        // Credential encryption round-trip
+        // Credential encryption round-trip. credOk is kept: the
+        // relay check below reads it so a device-side protection
+        // fault is never reported as a relay fault (0b Finding 2).
+        var credOk = true
         try {
             val probe = "selftest-probe"
             val ok = Crypto.unprotect(Crypto.protect(probe)) == probe
+            credOk = ok
             out.add(Result("Credential encryption (Android Keystore)", ok,
                 if (ok) "Encrypt/decrypt round-trip OK" else "Round-trip mismatch"))
         } catch (e: Exception) {
-            out.add(Result("Credential encryption (Android Keystore)", false, "${e.message}"))
+            credOk = false
+            out.add(Result("Credential encryption (Android Keystore)", false,
+                "Secure storage refused (${e.javaClass.simpleName}) — saved logins can't be protected or read on this device"))
         }
         // Discovery sockets
         try {
@@ -83,6 +89,7 @@ object SelfTest {
                 } catch (_: Exception) { false }
                 out.add(Result("Home relay (${cfgR.relay.host}:${cfgR.relay.port})", up,
                     if (up) "The relay answers — away viewing has its road home"
+                    else if (!credOk) "The relay does not answer from this device — and this device's login protection is faulty (the check above), so the fault may be in this device, not the relay"
                     else "The relay does NOT answer — the computer that carries the cameras may be off or asleep"))
             }
         } catch (e: Exception) {

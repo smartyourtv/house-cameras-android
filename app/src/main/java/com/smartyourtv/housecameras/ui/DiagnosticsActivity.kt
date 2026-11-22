@@ -67,6 +67,8 @@ class DiagnosticsActivity : Activity() {
                     appendLine("Self-repairs: ${repairs.joinToString("; ")}")
                 if (Crypto.unlockFailures > 0)
                     appendLine("Stored logins: ${Crypto.unlockFailures} could not be unlocked on this device — re-enter the camera password in its settings.")
+                if (Store.lastSaveRefusal.isNotEmpty())
+                    appendLine("Settings save refused on this device — it can't protect saved logins (secure storage fault); nothing was written.")
             }
         })
 

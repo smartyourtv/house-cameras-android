@@ -130,8 +130,18 @@ class SettingsActivity : Activity() {
             cfg.relay.host = hostF.text.toString().trim()
             cfg.relay.port = portF.text.toString().toIntOrNull() ?: 8554
             cfg.relay.sessionToken = tokenF.text.toString()
-            Store.save(this, cfg)
-            Toast.makeText(this, "Saved.", Toast.LENGTH_SHORT).show(); finish()
+            // 0b Finding 1: a refused save (this device can't
+            // protect the logins it carries) is said in plain
+            // words and the form STAYS — never a crash, never a
+            // false "Saved.", never the entries lost.
+            when (val r = Store.save(this, cfg)) {
+                is Store.SaveResult.Saved -> {
+                    Toast.makeText(this, "Saved.", Toast.LENGTH_SHORT).show(); finish()
+                }
+                is Store.SaveResult.Refused -> android.app.AlertDialog.Builder(this)
+                    .setTitle("Settings not saved").setMessage(r.reason)
+                    .setPositiveButton("OK", null).show()
+            }
         }
         root.addView(saveBtn)
 

@@ -88,13 +88,33 @@ class EditCameraActivity : Activity() {
                     other.credentials.password = cam.credentials.password
                 }
             }
-            Store.save(this, cfg)
-            Toast.makeText(this, "Saved.", Toast.LENGTH_SHORT).show(); finish()
+            // 0b Finding 1: a refused save is said in plain words
+            // and the form STAYS — never a crash, never a false
+            // "Saved.", never the entries lost.
+            when (val r = Store.save(this, cfg)) {
+                is Store.SaveResult.Saved -> {
+                    Toast.makeText(this, "Saved.", Toast.LENGTH_SHORT).show(); finish()
+                }
+                is Store.SaveResult.Refused -> android.app.AlertDialog.Builder(this)
+                    .setTitle("Camera not saved").setMessage(r.reason)
+                    .setPositiveButton("OK", null).show()
+            }
         }
         root.addView(saveBtn)
         if (!isNew) {
             val del = Button(this).apply { text = "Remove this camera" }
-            del.setOnClickListener { cfg.cameras.removeAt(idx); Store.save(this@EditCameraActivity, cfg); finish() }
+            del.setOnClickListener {
+                val removed = cfg.cameras.removeAt(idx)
+                when (val r = Store.save(this@EditCameraActivity, cfg)) {
+                    is Store.SaveResult.Saved -> finish()
+                    is Store.SaveResult.Refused -> {
+                        cfg.cameras.add(idx, removed)
+                        android.app.AlertDialog.Builder(this@EditCameraActivity)
+                            .setTitle("Camera not removed").setMessage(r.reason)
+                            .setPositiveButton("OK", null).show()
+                    }
+                }
+            }
             root.addView(del)
         }
         root.layoutParams = android.widget.FrameLayout.LayoutParams(

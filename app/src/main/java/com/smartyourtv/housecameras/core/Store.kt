@@ -90,9 +90,57 @@ object Store {
         return out
     }
 
-    fun save(ctx: Context, cfg: AppConfig) {
+    /** 0b Finding 1 (2026-11-22): a save that cannot protect the
+     *  credentials it carries must REFUSE — nothing written, the
+     *  caller told in plain words, the form left standing. Before
+     *  this, a device whose keystore refused the key crashed
+     *  every save uncaught (Crypto.protect threw straight through
+     *  toJson) and ate the form with it. */
+    sealed class SaveResult {
+        object Saved : SaveResult()
+        data class Refused(val reason: String) : SaveResult()
+    }
+    class ProtectionRefused(message: String) : Exception(message)
+
+    const val PROTECTION_REFUSAL_WORDS =
+        "Nothing was saved. This device can't protect saved logins — " +
+        "its secure storage refused to make or use the key. What you " +
+        "typed is still on this screen; nothing was written or lost. " +
+        "The same fault shows in the app's self-test — this device " +
+        "may not be able to keep viewer logins at all."
+
+    @Volatile var lastSaveRefusal: String = ""
+    @Volatile var lastSaveRefusalAt: Long = 0L
+
+    /** Every credential in the config, run through [protect], on
+     *  a copy — the caller's config is never mutated. Empty values
+     *  never touch the protector (a credential-free save needs no
+     *  keystore at all). Any failure becomes a ProtectionRefused:
+     *  a config is never half-protected. Pure apart from the
+     *  lambda, so the unit tests drive it directly. */
+    fun protectedCopy(cfg: AppConfig, protect: (String) -> String): AppConfig {
+        fun p(s: String): String = if (s.isEmpty()) s else protect(s)
+        try {
+            val cams = cfg.cameras.map { c ->
+                c.copy(credentials = Credentials(c.credentials.username, p(c.credentials.password)))
+            }.toMutableList()
+            return cfg.copy(cameras = cams,
+                relay = cfg.relay.copy(sessionToken = p(cfg.relay.sessionToken)))
+        } catch (e: Exception) {
+            throw ProtectionRefused(PROTECTION_REFUSAL_WORDS)
+        }
+    }
+
+    fun save(ctx: Context, cfg: AppConfig): SaveResult {
+        val json = try { toJson(cfg) } catch (e: ProtectionRefused) {
+            lastSaveRefusal = e.message ?: PROTECTION_REFUSAL_WORDS
+            lastSaveRefusalAt = System.currentTimeMillis()
+            repairLog.add("Settings NOT saved — this device can't protect saved logins (secure storage refused). Nothing was written.")
+            persistRepairLog(ctx)
+            return SaveResult.Refused(lastSaveRefusal)
+        }
         val tmp = File(ctx.filesDir, "config.json.tmp")
-        tmp.writeText(toJson(cfg).toString())
+        tmp.writeText(json.toString())
         // Pack E L7: a failed rename used to leave a stale config
         // with no error anywhere. Check it, and say so.
         if (!tmp.renameTo(file(ctx))) {
@@ -100,9 +148,12 @@ object Store {
             persistRepairLog(ctx)
             try { tmp.copyTo(file(ctx), overwrite = true) } catch (_: Exception) {}
         }
+        return SaveResult.Saved
     }
 
-    fun toJson(cfg: AppConfig): JSONObject {
+    fun toJson(cfg: AppConfig): JSONObject = toJsonRaw(protectedCopy(cfg) { Crypto.protect(it) })
+
+    private fun toJsonRaw(cfg: AppConfig): JSONObject {
         val arr = JSONArray()
         for (c in cfg.cameras) {
             arr.put(JSONObject()
@@ -110,7 +161,7 @@ object Store {
                 .put("enabled", c.enabled).put("notes", c.notes)
                 .put("credentials", JSONObject()
                     .put("username", c.credentials.username)
-                    .put("password", Crypto.protect(c.credentials.password)))
+                    .put("password", c.credentials.password))
                 .put("main", sourceJson(c.main)).put("sub", sourceJson(c.sub))
                 .put("identity", JSONObject()
                     .put("mac", c.identity.mac)
@@ -147,7 +198,7 @@ object Store {
             .put("relay", JSONObject()
                 .put("enabled", cfg.relay.enabled).put("host", cfg.relay.host)
                 .put("port", cfg.relay.port).put("httpPort", cfg.relay.httpPort)
-                .put("sessionToken", Crypto.protect(cfg.relay.sessionToken)))
+                .put("sessionToken", cfg.relay.sessionToken))
             .put("lastNotifiedVersionCode", cfg.lastNotifiedVersionCode)
             .put("updateNoticeDismissed", cfg.updateNoticeDismissed)
     }
