@@ -104,7 +104,11 @@ class IdentityTest {
         val withSerial = id.copy(onvifSerial = "7ca7b036effc")
         assertEquals(3, IdentityMatch.score(withSerial,
             IdentityMatch.Evidence(serial = "7ca7b036effc", family = "hip2p"), "hip2p"))
-        assertEquals(0, IdentityMatch.score(withSerial,
+        // A WRONG serial earns no anchor: all that remains is the
+        // family-only point (1) — far below the adoption grade
+        // (>= 2 plus a pulled frame). The wrong serial itself
+        // contributes nothing.
+        assertEquals(1, IdentityMatch.score(withSerial,
             IdentityMatch.Evidence(serial = "001122334455", family = "hip2p"), "hip2p"))
     }
     @Test fun onvifReplyIdentityParses() {

@@ -49,7 +49,7 @@ class CoreTest {
         // rtsp://scout:<session-token>@100.78.8.93:8554/house-N
         val cam = Camera(name = "house-4", host = "192.168.40.218",
             credentials = Credentials("admin", "pw"))
-        val relay = RelayConfig(enabled = true, sessionToken = "tok123")
+        val relay = RelayConfig(enabled = true, host = "100.78.8.93", sessionToken = "tok123")
         assertEquals("100.78.8.93", relay.host)
         val url = cam.streamUrl(Templates.forFamily("hip2p").main, relay)
         assertEquals("rtsp://scout:tok123@100.78.8.93:8554/house-4", url)

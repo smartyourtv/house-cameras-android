@@ -21,7 +21,9 @@ class StageTest {
     }
 
     @Test fun dvrPathsAndUrl() {
-        val dvr = DvrConfig()
+        // Portability (Nov 22): the shipped default host is EMPTY —
+        // no house's relay address is a default. Fixtures name it.
+        val dvr = DvrConfig(host = "192.168.40.189")
         assertEquals("/dvr-1", dvr.path(0))
         assertEquals("/dvr-4", dvr.path(3))
         val src = CameraSource(kind = "rtsp", path = dvr.path(1), port = dvr.port, via = "relay")
