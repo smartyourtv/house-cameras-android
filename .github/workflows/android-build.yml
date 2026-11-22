@@ -38,8 +38,14 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --no-daemon
 
+      # CI builds the DEBUG apk only. The release build refuses to
+      # run without the fleet keystore (build.gradle.kts: "Release
+      # signing is not configured — refusing to build an unsigned
+      # release"), and the keystore does not live in CI secrets —
+      # release assembly stays a keystore-present ship step on the
+      # bench. The debug apk is the proof-stage vehicle.
       - name: Build APKs
-        run: ./gradlew assembleDebug assembleRelease --no-daemon
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
@@ -47,7 +53,6 @@ jobs:
           name: house-cameras-apks
           path: |
             app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Upload test reports
