@@ -174,7 +174,7 @@ object Store {
                 viewers = o.optString("viewers", "household").ifEmpty { "household" },
                 recorder = o.optString("recorder"),
                 siteId = o.optString("siteId", "home").ifEmpty { "home" },
-                setupClass = o.optString("setupClass"))))
+                setupClass = o.optString("setupClass")))
         }
         val r = root.optJSONObject("relay") ?: JSONObject()
         cfg.relay = RelayConfig(r.optBoolean("enabled", false),

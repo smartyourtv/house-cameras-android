@@ -230,8 +230,8 @@ class CameraPlayer(
         if ("household" !in allowed) {
             stopped = true
             status("Not on this viewer's list for ${cam.name}")
-            com.smartyourtv.housecameras.core.Reports.event(
-                "VIEW", cam.name, "viewer household not in allowance (${cam.viewers}) — view refused")
+            com.smartyourtv.housecameras.core.Reports.event(ctx,
+                "VIEW: ${cam.name} — viewer household not in allowance (${cam.viewers}); view refused")
             return
         }
         status("Connecting…")
