@@ -58,7 +58,7 @@ class CoreTest {
         // No token yet -> no user-info; the relay will 401 and the app
         // reports "not connected", which is the resting state.
         val bare = cam.streamUrl(Templates.forFamily("hip2p").main,
-            RelayConfig(enabled = true))
+            RelayConfig(enabled = true, host = "100.78.8.93"))
         assertEquals("rtsp://100.78.8.93:8554/house-4", bare)
         // HLS fallback lives on :8888 with the same slot path.
         assertEquals("http://100.78.8.93:8888/house-4/index.m3u8", cam.hlsUrl(relay))
